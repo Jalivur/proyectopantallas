@@ -2,8 +2,26 @@ import time
 import psutil
 import subprocess
 from PIL import Image, ImageDraw, ImageFont
+import os
+import sys
+sys.path.append("/home/jalivur/Documents/proyectyopantallas")
 from Code.expansion import Expansion
 from Code.oled import OLED
+
+import signal
+import sys
+
+stop_flag = False
+
+def handle_exit(signum, frame):
+    global stop_flag
+    print(f"Señal {signum} recibida, saliendo...")
+    stop_flag = True
+
+# Capturar SIGTERM (pkill normal) y SIGINT (Ctrl+C)
+signal.signal(signal.SIGTERM, handle_exit)
+signal.signal(signal.SIGINT, handle_exit)
+
 # ---------- Inicialización ----------
 board = Expansion()
 
@@ -43,6 +61,14 @@ def smooth(prev, target, step=10):
         prev[i] + max(-step, min(step, target[i] - prev[i]))
         for i in range(3)
     )
+def get_ip():
+    for _ in range(10):  # hasta 10 intentos
+        ip_output = subprocess.getoutput("hostname -I").split()
+        if ip_output:
+            return ip_output[0]
+        time.sleep(1)
+    return "No IP"
+
 
 last_state = {
     "cpu": None,
@@ -90,11 +116,11 @@ try:
     board.set_led_mode(1)  # RGB fijo
     current_color = (0, 255, 0)
 
-    while True:
+    while not stop_flag:
         cpu = psutil.cpu_percent()
         ram = psutil.virtual_memory().percent
         temp = get_cpu_temp()
-        ip = subprocess.getoutput("hostname -I").split()[0]
+        ip = get_ip()
 
         fan_pwm = fan_curve(temp)
         board.set_fan_duty(fan_pwm, fan_pwm)
@@ -109,7 +135,10 @@ try:
         time.sleep(0.5)
 
 except KeyboardInterrupt:
+    print("Salida limpia")
+except Exception as e:
+    print(f"Unexpected error: {e}")
+finally:
+    oled.clear()
     board.set_all_led_color(0, 0, 0)
     board.set_fan_duty(0, 0)
-    oled.clear()
-    print("Salida limpia")
