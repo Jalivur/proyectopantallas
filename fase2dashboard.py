@@ -221,431 +221,216 @@ mode_var = tk.StringVar(value="auto")
 manual_pwm = tk.IntVar(value=128)
 curve_vars = []
 last_state = None
-# Allow forcing compact layout from UI
-compact_var = tk.BooleanVar(value=False)
 
-def toggle_compact_mode():
-    """Toggle compact mode and rebuild the control window to apply layout."""
-    try:
-        new = compact_var.get()
-        logging.info(f"toggle_compact_mode -> {new}")
-        if control_win and control_win.winfo_exists():
-            control_win.destroy()
-            # reopen with new compact setting
-            open_control_window()
-    except Exception:
-        logging.exception("Failed toggling compact mode")
+
 
 def open_control_window():
     global control_win, curve_vars
 
-    try:
-        logging.info("Opening control window")
+    if control_win and control_win.winfo_exists():
+        control_win.lift()
+        return
 
-        if control_win and control_win.winfo_exists():
-            control_win.lift()
-            control_win.focus_force()
+    control_win = tk.Toplevel(root)
+    control_win.title("Fan Control")
+    control_win.configure(bg="black")
+    control_win.geometry("780x460")
+    control_win.resizable(False, False)
+    control_win.transient(root)
+    control_win.attributes("-topmost", True)
+    control_win.protocol("WM_DELETE_WINDOW", on_control_close)
+
+    # ======================================================
+    # CONTENEDOR PRINCIPAL
+    # ======================================================
+    main = tk.Frame(control_win, bg="black")
+    main.pack(fill="both", expand=True)
+
+    top = tk.Frame(main, bg="black")
+    top.pack(fill="both", expand=True, padx=6, pady=(6, 2))
+
+    bottom = tk.Frame(main, bg="black")
+    bottom.pack(fill="x", padx=8, pady=(0, 4))
+
+    # ======================================================
+    # SECCIÓN MODO
+    # ======================================================
+    mode_frame = tk.LabelFrame(
+        top, text="Modo",
+        fg="white", bg="black",
+        labelanchor="nw", padx=10, pady=8
+    )
+    mode_frame.pack(fill="x", pady=4)
+
+    modes_row = tk.Frame(mode_frame, bg="black")
+    modes_row.pack(anchor="w")
+
+    def set_mode(mode):
+        mode_var.set(mode)
+        write_state({"mode": mode, "target_pwm": None})
+
+    for m in ("auto", "silent", "normal", "performance", "manual"):
+        tk.Radiobutton(
+            modes_row,
+            text=m.upper(),
+            variable=mode_var,
+            value=m,
+            command=lambda m=m: set_mode(m),
+            bg="black",
+            fg="white",
+            selectcolor="black"
+        ).pack(side="left", padx=6)
+
+    # ======================================================
+    # SECCIÓN MANUAL PWM
+    # ======================================================
+    manual_frame = tk.LabelFrame(
+        top, text="Control manual PWM",
+        fg="white", bg="black",
+        labelanchor="nw", padx=10, pady=8
+    )
+    manual_frame.pack(fill="x", pady=4)
+
+    manual_row = tk.Frame(manual_frame, bg="black")
+    manual_row.pack(fill="x")
+
+    manual_scale = tk.Scale(
+        manual_row,
+        from_=0, to=255,
+        orient="horizontal",
+        variable=manual_pwm,
+        bg="black",
+        fg="white",
+        highlightthickness=0,
+        length=560,
+        sliderlength=36,
+        width=30
+    )
+    manual_scale.pack(side="left", fill="x", expand=True)
+
+    manual_lbl = tk.Label(
+        manual_row,
+        textvariable=manual_pwm,
+        fg="white",
+        bg="black",
+        width=4,
+        font=("FiraFiraMono Nerd Font", 20, "bold")
+    )
+    manual_lbl.pack(side="left", padx=12)
+
+    def on_manual_pwm(val):
+        if mode_var.get() != "manual":
             return
+        v = max(0, min(255, int(float(val))))
+        manual_pwm.set(v)
+        write_state({"mode": "manual", "target_pwm": v})
 
-        control_win = tk.Toplevel(root)
-        control_win.title("Fan Control")
-        control_win.configure(bg="black")
-        # Position control window inside the DSI screen with margins (robust)
-        cw_w, cw_h = 600, 400
-        cw_x, cw_y = 100, 100
-        try:
-            if DSI_X is not None and DSI_Y is not None:
-                cw_w = min(780, max(300, DSI_WIDTH - 20))
-                cw_h = min(460, max(200, DSI_HEIGHT - 20))
-                cw_x = DSI_X + 10
-                cw_y = DSI_Y + 10
-            else:
-                # fallback to centering on primary screen
-                screen_w = root.winfo_screenwidth()
-                screen_h = root.winfo_screenheight()
-                cw_w = min(780, max(300, screen_w - 300))
-                cw_h = min(460, max(200, screen_h - 200))
-                cw_x = max(0, (screen_w - cw_w) // 2)
-                cw_y = max(0, (screen_h - cw_h) // 2)
-            control_win.geometry(f"{cw_w}x{cw_h}+{cw_x}+{cw_y}")
-            control_win.minsize(300,200)
-            # Keep the control window fixed to avoid content overflow on small displays
-            try:
-                control_win.resizable(False, False)
-            except Exception:
-                pass
-            logging.info(f"Control window geometry set to {cw_w}x{cw_h}+{cw_x}+{cw_y}")
-        except Exception:
-            control_win.geometry("600x500")
-            cw_w, cw_h = 500, 400
+    manual_scale.configure(command=on_manual_pwm)
 
-        # Use transient/topmost and focus rather than grab_set (modal grabs can interfere with some input devices)
-        control_win.transient(root)
-        try:
-            control_win.attributes("-topmost", True)
-        except Exception:
-            pass
-        control_win.focus_set()
-        control_win.protocol("WM_DELETE_WINDOW", on_control_close)
-        # allow Esc to close the control window
-        control_win.bind("<Escape>", lambda e: on_control_close())
+    # ======================================================
+    # SECCIÓN CURVA (SCROLL)
+    # ======================================================
+    curve_frame = tk.LabelFrame(
+        top, text="Curva térmica",
+        fg="white", bg="black",
+        labelanchor="nw", padx=10, pady=8
+    )
+    curve_frame.pack(fill="both", expand=True, pady=4)
 
-        # Log focus events to help diagnose responsiveness on different displays
-        control_win.bind("<FocusIn>", lambda e: logging.info("Control window FocusIn"))
-        control_win.bind("<FocusOut>", lambda e: logging.info("Control window FocusOut"))
-        control_win.bind("<Map>", lambda e: logging.info(f"Control window mapped at {control_win.winfo_x()},{control_win.winfo_y()} size {control_win.winfo_width()}x{control_win.winfo_height()}"))
+    canvas = tk.Canvas(curve_frame, bg="black", highlightthickness=0, height=180)
+    canvas.pack(side="left", fill="both", expand=True)
 
-        # Resize handling: debounce configure events and adjust slider lengths
-        """def _adjust_scales_to_width():
-            try:
-                w = max(200, control_win.winfo_width())
-                # compute new scale length
-                new_len = max(120, w - 220)
-                try:
-                    manual_scale.config(length=new_len)
-                except Exception:
-                    pass
-                # iterate content children to find scales and update them
-                try:
-                    for child in content.winfo_children():
-                        # if direct Scale
-                        if isinstance(child, tk.Scale):
-                            child.config(length=new_len)
-                        else:
-                            for c2 in child.winfo_children():
-                                if isinstance(c2, tk.Scale):
-                                    c2.config(length=new_len)
-                except Exception:
-                    pass
-                logging.info(f"Adjusted scales to length {new_len} on resize ({w}px)")
-            except Exception:
-                logging.exception("Failed adjusting scales on resize")"""
+    scrollbar = tk.Scrollbar(curve_frame, orient="vertical", command=canvas.yview)
+    scrollbar.pack(side="right", fill="y")
 
-        def _on_control_configure(event):
-            try:
-                if hasattr(control_win, '_resize_after'):
-                    control_win.after_cancel(control_win._resize_after)
-                control_win._resize_after = control_win.after(250)
-            except Exception:
-                pass
+    canvas.configure(yscrollcommand=scrollbar.set)
 
-        control_win.bind('<Configure>', _on_control_configure)
+    curve_inner = tk.Frame(canvas, bg="black")
+    canvas.create_window((0, 0), window=curve_inner, anchor="nw")
 
-        # Pointer event logging for widgets on this Toplevel (helps detect input not reaching controls)
-        def _pointer_event(e):
-            try:
-                if e.widget.winfo_toplevel() == control_win:
-                    logging.info(f"Pointer event on control window: widget={e.widget}, x={e.x_root}, y={e.y_root}")
-            except Exception:
-                pass
-        control_win.bind_all("<Button-1>", _pointer_event)
+    curve_inner.bind(
+        "<Configure>",
+        lambda e: canvas.configure(scrollregion=canvas.bbox("all"))
+    )
 
-        # Create a scrollable area for the controls
-        content_container = tk.Frame(control_win, bg="black")
-        content_container.pack(fill="both", expand=False)
-        # Configure canvas to fit within computed control window size
-        canvas_w = max(200, cw_w - 24)
-        canvas_h = 200
-        canvas = tk.Canvas(content_container, bg="black", highlightthickness=0, width=canvas_w, height=canvas_h)
-        vsb = tk.Scrollbar(content_container, orient="vertical", command=canvas.yview, width=16)
-        vsb.pack(side="right", fill="y")
-        canvas.pack(side="left", fill="both", expand=True)
-        canvas.configure(yscrollcommand=vsb.set)
-        inner = tk.Frame(canvas, bg="black", width=canvas_w)
-        canvas.create_window((0,0), window=inner, anchor="nw", width=canvas_w)
-        def _on_inner_config(event):
-            # ensure scrollregion matches current contents
-            canvas.configure(scrollregion=canvas.bbox("all"))
-        inner.bind("<Configure>", _on_inner_config)
-        content = inner
-        # Dynamic scale length for sliders to avoid overflow
-        scale_len = max(200, cw_w - 180)
+    curve_vars.clear()
 
-        # update the manual scale later to use scale_len
-        # (we will configure its length when creating it below)
+    for p in load_curve():
+        row = tk.Frame(curve_inner, bg="black")
+        row.pack(fill="x", pady=6)
 
-        # Mouse wheel support for scrolling (Linux, Windows, macOS)
-        def _on_mousewheel(event):
-            try:
-                # X11: Button-4 (up), Button-5 (down)
-                if hasattr(event, 'num') and event.num == 4:
-                    canvas.yview_scroll(-1, "units")
-                    return
-                if hasattr(event, 'num') and event.num == 5:
-                    canvas.yview_scroll(1, "units")
-                    return
-                # Windows / macOS: event.delta
-                delta = getattr(event, 'delta', 0)
-                if delta:
-                    canvas.yview_scroll(-int(delta / 120), "units")
-            except Exception:
-                logging.exception("Error handling mousewheel")
+        tk.Label(
+            row,
+            text=f'{p["temp"]}°C',
+            fg="white",
+            bg="black",
+            width=6
+        ).pack(side="left")
 
-        # Bind mousewheel only while pointer is over the canvas to avoid global grabbing
-        def _bind_mousewheel(event):
-            #canvas.bind("<Button-4>", _on_mousewheel)
-            #canvas.bind("<Button-5>", _on_mousewheel)
-            canvas.bind("<MouseWheel>", _on_mousewheel)
+        var = tk.IntVar(value=p["pwm"])
 
-        def _unbind_mousewheel(event):
-            #canvas.unbind("<Button-4>")
-            #canvas.unbind("<Button-5>")
-            canvas.unbind("<MouseWheel>")
+        val_lbl = tk.Label(
+            row,
+            textvariable=var,
+            fg="white",
+            bg="black",
+            width=4
+        )
+        val_lbl.pack(side="right")
 
-        canvas.bind("<Enter>", _bind_mousewheel)
-        canvas.bind("<Leave>", _unbind_mousewheel)
-
-        # Top fixed area with mode/manual/actions (always visible)
-        top_area = tk.Frame(control_win, bg="black")
-        top_area.pack(fill="x", padx=6, pady=6)
-
-        # ---------- MODE (fixed) ----------
-        tk.Label(top_area, text="Modo", fg="white", bg="black").grid(row=0, column=0, sticky="w", padx=(0,3))
-        modes_frame = tk.Frame(top_area, bg="black")
-        modes_frame.grid(row=0, column=1, sticky="w", padx=(3,0))
-
-        def set_mode(mode):
-            logging.info(f"set_mode -> {mode}")
-            mode_var.set(mode)
-            write_state({"mode": mode, "target_pwm": None})
-
-        for i, m in enumerate(("auto", "silent", "normal", "performance", "manual")):
-            tk.Radiobutton(
-                modes_frame,
-                text=m.upper(),
-                variable=mode_var,
-                value=m,
-                command=lambda m=m: set_mode(m),
-                bg="black", fg="white",
-                selectcolor="black",
-                indicatoron=1
-            ).pack(side="left", padx=(0,3))
-
-
-        # ---------- MANUAL (fixed) ----------
-        tk.Label(top_area, text="PWM Manual (0-255)", fg="white", bg="black").grid(row=1, column=0, sticky="w", pady=(3,0))
-        manual_frame = tk.Frame(top_area, bg="black")
-        manual_frame.grid(row=1, column=1, sticky="we", pady=(3,0))
-        manual_scale = tk.Scale(
-            manual_frame,
+        tk.Scale(
+            row,
             from_=0, to=255,
             orient="horizontal",
-            variable=manual_pwm,
-            bg="black", fg="white",
+            variable=var,
+            bg="black",
+            fg="white",
             highlightthickness=0,
-            length=400,  # will be updated later
-            sliderlength=30,
-            width=40
-        )
-        manual_scale.pack(side="left")
-        manual_lbl = tk.Label(manual_frame, text=str(manual_pwm.get()), fg="white", bg="black", width=3)
-        manual_lbl.pack(side="left", padx=(3,0))
+            length=520,
+            sliderlength=28,
+            width=20
+        ).pack(side="left", fill="x", expand=True, padx=6)
 
-        def on_manual_pwm(val):
-            logging.info(f"on_manual_pwm -> {val} (mode={mode_var.get()})")
-            if mode_var.get() != "manual":
-                return
-            try:
-                val_int = int(float(val))
-            except Exception:
-                val_int = manual_pwm.get()
-            val_int = max(0, min(255, val_int))
-            manual_pwm.set(val_int)
-            logging.info(f"manual PWM set to {val_int}")
-            write_state({"mode": "manual", "target_pwm": val_int})
+        curve_vars.append((p["temp"], var))
 
-        # update label on change and call on_manual_pwm
-        manual_scale.configure(command=lambda v: (on_manual_pwm(v), manual_lbl.config(text=str(int(float(v))))) )
+    # ======================================================
+    # SECCIÓN ACCIONES
+    # ======================================================
+    actions = tk.Frame(bottom, bg="black")
+    actions.pack(fill="x", pady=4)
 
-        # Define save_curve before creating its button to avoid UnboundLocalError
-        def save_curve():
-            if not curve_vars:
-                logging.warning("save_curve called but no curve_vars present")
-                messagebox.showerror("Error", "No hay puntos de curva para guardar")
-                return
-            data = {
-                "points": sorted(
-                    [{"temp": t, "pwm": max(0, min(255, int(v.get())))} for t, v in curve_vars],
-                    key=lambda p: p["temp"]
-                )
-            }
-            logging.info(f"Saving curve data: {data}")
-            try:
-                with open(CURVE_FILE, "w") as f:
-                    json.dump(data, f, indent=2)
-                logging.info("Curva guardada correctamente")
-                messagebox.showinfo("Guardado", "Curva guardada correctamente")
-            except Exception as e:
-                logging.exception("Failed to save curve")
-                messagebox.showerror("Error", f"No se pudo guardar la curva: {e}")
-
-        # Action buttons fixed
-        actions_frame = tk.Frame(top_area, bg="black")
-        actions_frame.grid(row=3, column=0, columnspan=3, padx=(12,10))
-        tk.Button(actions_frame, text="Guardar curva", command=save_curve).pack(pady=(0,6))
-        def restore_default():
-            default = [
-                {"temp": 40, "pwm": 100},
-                {"temp": 50, "pwm": 130},
-                {"temp": 60, "pwm": 160},
-                {"temp": 70, "pwm": 180},
-                {"temp": 80, "pwm": 255}
+    def save_curve():
+        data = {
+            "points": [
+                {"temp": t, "pwm": v.get()}
+                for t, v in curve_vars
             ]
-            try:
-                with open(CURVE_FILE, "w") as f:
-                    json.dump({"points": default}, f, indent=2)
-                messagebox.showinfo("Restaurado", "Curva por defecto restaurada")
-                logging.info("Curva restaurada a valores por defecto")
-                # recreate the control window to refresh sliders
-                control_win.destroy()
-                open_control_window()
-            except Exception:
-                logging.exception("Failed to restore default curve")
-                messagebox.showerror("Error", "No se pudo restaurar la curva por defecto")
-        tk.Button(actions_frame, text="Restaurar por defecto", command=restore_default).pack()
-        # Close button to properly shut the control window and cleanup
-        tk.Button(actions_frame, text="Cerrar", command=on_control_close).pack(pady=(6,0))
+        }
+        with open(CURVE_FILE, "w") as f:
+            json.dump(data, f, indent=2)
+        messagebox.showinfo("Guardado", "Curva guardada correctamente")
 
-        # Quick scroll buttons (helpful if mouse wheel not working)
-        """
-        btn_frame = tk.Frame(content, bg="black")
-        btn_frame.pack(fill="x", pady=(6,0))
-        tk.Button(btn_frame, text="↑", command=lambda: canvas.yview_scroll(-1, "pages"), width=3).pack(side="left", padx=(0,6))
-        tk.Button(btn_frame, text="↓", command=lambda: canvas.yview_scroll(1, "pages"), width=3).pack(side="left")
-        """
-        # ---------- CURVE ----------
-        tk.Label(content, text="Curva térmica", fg="white", bg="black").pack(anchor="w", pady=(10,0))
+    def restore_default():
+        default = [
+            {"temp": 40, "pwm": 100},
+            {"temp": 50, "pwm": 130},
+            {"temp": 60, "pwm": 160},
+            {"temp": 70, "pwm": 180},
+            {"temp": 80, "pwm": 255}
+        ]
+        with open(CURVE_FILE, "w") as f:
+            json.dump({"points": default}, f, indent=2)
+        control_win.destroy()
+        open_control_window()
 
-        curve_vars.clear()
+    tk.Button(actions, text="Guardar curva", command=save_curve)\
+        .pack(side="left", padx=10)
 
-        status_lbl = tk.Label(content, text="", fg="white", bg="black")
-        status_lbl.pack(anchor="w")
+    tk.Button(actions, text="Restaurar por defecto", command=restore_default)\
+        .pack(side="left", padx=10)
 
-        try:
-            pts = load_curve()
-            n_pts = len(pts)
-            logging.info(f"Loaded curve with {n_pts} points")
-
-            # Determine if content fits; if not, enable compact modes to shrink vertical footprint
-            top_fixed_est = 140  # estimated vertical space taken by fixed top area
-            actions_est = 80     # estimated space for action buttons and margins
-            avail_height = cw_h - 24  # available inner height for content
-            per_row_default = 48
-            needed = top_fixed_est + actions_est + n_pts * per_row_default
-            compact = False
-            super_compact = False
-            small_slider_length = 18
-            small_scale_width = 16
-            small_label_font = (font[0], max(10, font[1]-4))
-
-            # If user forces compact mode, honor it and try to fit
-            if compact_var.get():
-                compact = True
-                scale_len = max(120, int(cw_w * 0.45))
-                status_lbl.config(text=f"Puntos: {n_pts} (compacto - forzado)")
-                try:
-                    manual_scale.config(length=scale_len, sliderlength=small_slider_length, width=small_scale_width)
-                    manual_lbl.config(font=small_label_font)
-                except Exception:
-                    pass
-                # If after forcing compact it still doesn't fit, escalate to super compact
-                if needed > avail_height and n_pts > 0:
-                    super_compact = True
-            elif needed > avail_height and n_pts > 0:
-                compact = True
-                # compute a per-row height that fits
-                per_row = max(18, (avail_height - top_fixed_est - actions_est) // n_pts)
-                scale_len = max(120, int(cw_w * 0.45))
-                logging.info(f"Switching to compact layout: per_row={per_row}, scale_len={scale_len}")
-                status_lbl.config(text=f"Puntos: {n_pts} (compacto)")
-                # shrink manual scale to match new size
-                try:
-                    manual_scale.config(length=scale_len, sliderlength=small_slider_length, width=small_scale_width)
-                    manual_lbl.config(font=small_label_font)
-                except Exception:
-                    pass
-                # If still not enough vertical room, escalate to super compact
-                if needed > avail_height and n_pts > 0:
-                    super_compact = True
-
-            # Super compact further reduces fonts, paddings and slider thickness
-            if super_compact:
-                logging.info("Enabling super compact layout")
-                per_row = max(16, (avail_height - top_fixed_est - actions_est) // max(1, n_pts))
-                scale_len = max(100, int(cw_w * 0.35))
-                small_slider_length = 16
-                small_scale_width = 12
-                small_label_font = (font[0], max(8, font[1]-6))
-                status_lbl.config(text=f"Puntos: {n_pts} (super compacto)")
-                try:
-                    manual_scale.config(length=scale_len, sliderlength=small_slider_length, width=small_scale_width)
-                    manual_lbl.config(font=small_label_font)
-                except Exception:
-                    pass
-
-            if not compact and not super_compact:
-                status_lbl.config(text=f"Puntos: {n_pts}")
-
-            for p in pts:
-                row = tk.Frame(content, bg="black")
-                # reduce vertical spacing in compact mode
-                row.pack(fill="x", pady=(2,2) if compact else (6,6))
-
-                lbl_temp = tk.Label(row, text=f'{p["temp"]}°C', fg="white", bg="black", width=6)
-                if compact:
-                    lbl_temp.config(font=small_label_font)
-                lbl_temp.pack(side="left")
-
-                var = tk.IntVar(value=max(0, min(255, int(p.get("pwm", 0)))))
-                lbl_val = tk.Label(row, text=str(var.get()), fg="white", bg="black", width=5)
-                if compact:
-                    lbl_val.config(font=small_label_font)
-                lbl_val.pack(side="right")
-
-                def make_cmd(lbl, temp):
-                    def cmd(v):
-                        try:
-                            val = int(float(v))
-                        except Exception:
-                            val = int(lbl.cget("text"))
-                        lbl.config(text=str(val))
-                        logging.info(f"curve slider {temp}°C -> {val}")
-                    return cmd
-
-                tk.Scale(
-                    row,
-                    from_=0, to=255,
-                    orient="horizontal",
-                    variable=var,
-                    command=make_cmd(lbl_val, p["temp"]),
-                    bg="black", fg="white",
-                    highlightthickness=0,
-                    length=scale_len,
-                    sliderlength=(small_slider_length if compact else 25),
-                    width=(small_scale_width if compact else 20)
-                ).pack(fill="x", expand=True)
-
-                curve_vars.append((p["temp"], var))
-
-        except Exception:
-            logging.exception("Failed to create curve sliders")
-            messagebox.showerror("Error", "No se pudieron crear sliders de curva. Revisa el log.")
-
-        # Initialize controls from saved state
-        try:
-            st = load_state()
-            logging.info(f"Initializing control window with state: {st}")
-            mode_var.set(st.get("mode", "auto"))
-            tp = st.get("target_pwm")
-            if isinstance(tp, int):
-                manual_pwm.set(tp)
-        except Exception:
-            logging.exception("Failed to initialize control window state")
-
-
-    except Exception as e:
-        logging.exception("Failed to open control window")
-        messagebox.showerror("Error", f"Error al abrir ventana de control: {e}")
+    tk.Button(actions, text="Cerrar", command=on_control_close)\
+        .pack(side="right", padx=10)
 
 def on_control_close():
     # Remove any global pointer logging and topmost attribute before closing
