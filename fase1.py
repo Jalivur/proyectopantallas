@@ -7,6 +7,20 @@ import sys
 sys.path.append("/home/jalivur/Documents/proyectyopantallas")
 from Code.expansion import Expansion
 from Code.oled import OLED
+import json
+import os
+
+STATE_FILE = "/home/jalivur/Documents/proyectyopantallas/fan_state.json"
+
+def read_fan_state():
+    if not os.path.exists(STATE_FILE):
+        return None
+    try:
+        with open(STATE_FILE) as f:
+            return json.load(f)
+    except:
+        return None
+
 
 import signal
 import sys
@@ -30,6 +44,7 @@ oled = OLED()
 oled.clear()
 
 font = ImageFont.load_default()
+
 
 # ---------- Funciones ----------
 def get_cpu_temp():
@@ -115,17 +130,73 @@ try:
     board.set_fan_mode(1)  # Manual
     board.set_led_mode(1)  # RGB fijo
     current_color = (0, 255, 0)
-
+    last_pwm = None
+    last_ip = None
+    last_ip_time = 0
+    last_state_file = None
+    last_state_time = 0
+    last_temp = None
+    last_temp_time = 0
     while not stop_flag:
         cpu = psutil.cpu_percent()
         ram = psutil.virtual_memory().percent
-        temp = get_cpu_temp()
-        ip = get_ip()
+        
+        now = time.time()
+        if now - last_temp_time > 1:
+            last_temp = get_cpu_temp()
+            last_temp_time = now
 
-        fan_pwm = fan_curve(temp)
-        board.set_fan_duty(fan_pwm, fan_pwm)
-        fan0_duty = (board.get_fan0_duty()*100)//255 
-        fan1_duty = (board.get_fan1_duty()*100)//255
+        temp = last_temp
+        
+        now = time.time()
+
+        if now - last_ip_time > 30:   # cada 30 segundos
+            last_ip = get_ip()
+            last_ip_time = now
+
+        ip = last_ip
+
+
+        now = time.time()
+        if now - last_state_time > 1:
+            state = read_fan_state()
+            last_state_file = state
+            last_state_time = now
+        else:
+            state = last_state_file
+
+
+        fan_pwm = None
+
+        if state:
+            mode = state.get("mode")
+
+            if mode == "manual":
+                fan_pwm = state.get("target_pwm")
+
+            elif mode in ("auto", "silent", "normal", "performance"):
+                fan_pwm = state.get("target_pwm")
+
+        # fallback de seguridad (si no hay estado)
+        if fan_pwm is None:
+            fan_pwm = fan_curve(temp)
+
+        # aplicar solo si cambia
+        if fan_pwm != last_pwm:
+            board.set_fan_duty(fan_pwm, fan_pwm)
+            last_pwm = fan_pwm
+
+        def safe_duty(val):
+            if val is None:
+                return 0
+            return int(val * 100) // 255
+
+        fan_percent = int(last_pwm * 100 / 255)
+
+        fan0_duty = fan_percent
+        fan1_duty = fan_percent
+
+
         target_color = temp_to_color(temp)
         current_color = smooth(current_color, target_color)
         board.set_all_led_color(*current_color)
