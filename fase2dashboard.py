@@ -27,7 +27,7 @@ def get_cpu_temp():
 
 def get_fan_rpm():
     try:
-        with open("/sys/class/hwmon/hwmon4/fan1_input") as f:
+        with open("/sys/class/hwmon/hwmon2/fan1_input") as f:
             return int(f.read().strip())
     except:
         return 0
