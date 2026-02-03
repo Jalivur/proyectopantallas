@@ -277,7 +277,7 @@ def open_control_window():
             logging.info(f"Control window geometry set to {cw_w}x{cw_h}+{cw_x}+{cw_y}")
         except Exception:
             control_win.geometry("600x500")
-            cw_w, cw_h = 600, 500
+            cw_w, cw_h = 500, 400
 
         # Use transient/topmost and focus rather than grab_set (modal grabs can interfere with some input devices)
         control_win.transient(root)
@@ -296,7 +296,7 @@ def open_control_window():
         control_win.bind("<Map>", lambda e: logging.info(f"Control window mapped at {control_win.winfo_x()},{control_win.winfo_y()} size {control_win.winfo_width()}x{control_win.winfo_height()}"))
 
         # Resize handling: debounce configure events and adjust slider lengths
-        def _adjust_scales_to_width():
+        """def _adjust_scales_to_width():
             try:
                 w = max(200, control_win.winfo_width())
                 # compute new scale length
@@ -319,13 +319,13 @@ def open_control_window():
                     pass
                 logging.info(f"Adjusted scales to length {new_len} on resize ({w}px)")
             except Exception:
-                logging.exception("Failed adjusting scales on resize")
+                logging.exception("Failed adjusting scales on resize")"""
 
         def _on_control_configure(event):
             try:
                 if hasattr(control_win, '_resize_after'):
                     control_win.after_cancel(control_win._resize_after)
-                control_win._resize_after = control_win.after(250, _adjust_scales_to_width)
+                control_win._resize_after = control_win.after(250)
             except Exception:
                 pass
 
@@ -342,10 +342,10 @@ def open_control_window():
 
         # Create a scrollable area for the controls
         content_container = tk.Frame(control_win, bg="black")
-        content_container.pack(fill="both", expand=True)
+        content_container.pack(fill="both", expand=False)
         # Configure canvas to fit within computed control window size
         canvas_w = max(200, cw_w - 24)
-        canvas_h = max(200, cw_h - 120)
+        canvas_h = 200
         canvas = tk.Canvas(content_container, bg="black", highlightthickness=0, width=canvas_w, height=canvas_h)
         vsb = tk.Scrollbar(content_container, orient="vertical", command=canvas.yview, width=16)
         vsb.pack(side="right", fill="y")
@@ -383,13 +383,13 @@ def open_control_window():
 
         # Bind mousewheel only while pointer is over the canvas to avoid global grabbing
         def _bind_mousewheel(event):
-            canvas.bind("<Button-4>", _on_mousewheel)
-            canvas.bind("<Button-5>", _on_mousewheel)
+            #canvas.bind("<Button-4>", _on_mousewheel)
+            #canvas.bind("<Button-5>", _on_mousewheel)
             canvas.bind("<MouseWheel>", _on_mousewheel)
 
         def _unbind_mousewheel(event):
-            canvas.unbind("<Button-4>")
-            canvas.unbind("<Button-5>")
+            #canvas.unbind("<Button-4>")
+            #canvas.unbind("<Button-5>")
             canvas.unbind("<MouseWheel>")
 
         canvas.bind("<Enter>", _bind_mousewheel)
@@ -400,9 +400,9 @@ def open_control_window():
         top_area.pack(fill="x", padx=6, pady=6)
 
         # ---------- MODE (fixed) ----------
-        tk.Label(top_area, text="Modo", fg="white", bg="black").grid(row=0, column=0, sticky="w")
+        tk.Label(top_area, text="Modo", fg="white", bg="black").grid(row=0, column=0, sticky="w", padx=(0,3))
         modes_frame = tk.Frame(top_area, bg="black")
-        modes_frame.grid(row=0, column=1, sticky="w", padx=(8,0))
+        modes_frame.grid(row=0, column=1, sticky="w", padx=(3,0))
 
         def set_mode(mode):
             logging.info(f"set_mode -> {mode}")
@@ -419,19 +419,13 @@ def open_control_window():
                 bg="black", fg="white",
                 selectcolor="black",
                 indicatoron=1
-            ).pack(side="left", padx=(0,6))
-        # Compact mode toggle (forces compact layout when checked)
-        tk.Checkbutton(modes_frame, text="Compacto", variable=compact_var, command=toggle_compact_mode, bg="black", fg="white", selectcolor="black").pack(side="left", padx=(6,0))
-        # allow user to resize control window
-        try:
-            control_win.resizable(True, True)
-        except Exception:
-            pass
+            ).pack(side="left", padx=(0,3))
+
 
         # ---------- MANUAL (fixed) ----------
-        tk.Label(top_area, text="PWM Manual (0-255)", fg="white", bg="black").grid(row=1, column=0, sticky="w", pady=(6,0))
+        tk.Label(top_area, text="PWM Manual (0-255)", fg="white", bg="black").grid(row=1, column=0, sticky="w", pady=(3,0))
         manual_frame = tk.Frame(top_area, bg="black")
-        manual_frame.grid(row=1, column=1, sticky="we", pady=(6,0))
+        manual_frame.grid(row=1, column=1, sticky="we", pady=(3,0))
         manual_scale = tk.Scale(
             manual_frame,
             from_=0, to=255,
@@ -439,13 +433,13 @@ def open_control_window():
             variable=manual_pwm,
             bg="black", fg="white",
             highlightthickness=0,
-            length=scale_len,
-            sliderlength=20,
-            width=20
+            length=400,  # will be updated later
+            sliderlength=30,
+            width=40
         )
-        manual_scale.pack(side="left", fill="x", expand=True)
-        manual_lbl = tk.Label(manual_frame, text=str(manual_pwm.get()), fg="white", bg="black", width=5)
-        manual_lbl.pack(side="left", padx=(6,0))
+        manual_scale.pack(side="left")
+        manual_lbl = tk.Label(manual_frame, text=str(manual_pwm.get()), fg="white", bg="black", width=3)
+        manual_lbl.pack(side="left", padx=(3,0))
 
         def on_manual_pwm(val):
             logging.info(f"on_manual_pwm -> {val} (mode={mode_var.get()})")
@@ -487,7 +481,7 @@ def open_control_window():
 
         # Action buttons fixed
         actions_frame = tk.Frame(top_area, bg="black")
-        actions_frame.grid(row=0, column=2, rowspan=2, padx=(12,0))
+        actions_frame.grid(row=3, column=0, columnspan=3, padx=(12,10))
         tk.Button(actions_frame, text="Guardar curva", command=save_curve).pack(pady=(0,6))
         def restore_default():
             default = [
@@ -513,11 +507,12 @@ def open_control_window():
         tk.Button(actions_frame, text="Cerrar", command=on_control_close).pack(pady=(6,0))
 
         # Quick scroll buttons (helpful if mouse wheel not working)
+        """
         btn_frame = tk.Frame(content, bg="black")
         btn_frame.pack(fill="x", pady=(6,0))
         tk.Button(btn_frame, text="↑", command=lambda: canvas.yview_scroll(-1, "pages"), width=3).pack(side="left", padx=(0,6))
         tk.Button(btn_frame, text="↓", command=lambda: canvas.yview_scroll(1, "pages"), width=3).pack(side="left")
-
+        """
         # ---------- CURVE ----------
         tk.Label(content, text="Curva térmica", fg="white", bg="black").pack(anchor="w", pady=(10,0))
 
