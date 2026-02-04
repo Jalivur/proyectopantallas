@@ -33,6 +33,71 @@ TEMP_CRIT = 75
 RAM_WARN  = 65
 RAM_CRIT  = 85
 
+# --- FUNCIONES HELPER PARA ESTILO FUTURISTA ---
+def style_radiobutton(rb, fg="#00ffff", bg="#111111", hover_fg="#ffffff"):
+    rb.config(
+        fg=fg,
+        bg=bg,
+        selectcolor=bg,  # quitar el color por defecto
+        activeforeground=fg,
+        activebackground=bg,
+        font=("FiraFiraMono Nerd Font", 14, "bold"),
+        indicatoron=True  # mantiene el circulito
+    )
+    
+    # Hover glow
+    def on_enter(e): rb.config(fg=hover_fg)
+    def on_leave(e): rb.config(fg=fg)
+    rb.bind("<Enter>", on_enter)
+    rb.bind("<Leave>", on_leave)
+
+def make_futuristic_button(parent, text, command=None, width=12, height=2):
+    btn = tk.Button(
+        parent,
+        text=text,
+        command=command,
+        fg="#00ffff",
+        bg="#111111",
+        activebackground="#222222",
+        activeforeground="#00ffff",
+        borderwidth=2,
+        relief="ridge",
+        width=width,
+        height=height,
+        font=("FiraFiraMono Nerd Font", 14, "bold")
+    )
+    def on_enter(e): btn.config(fg="#00ffff", bg="#222222")
+    def on_leave(e): btn.config(fg="#00ffff", bg="#111111")
+    btn.bind("<Enter>", on_enter)
+    btn.bind("<Leave>", on_leave)
+    return btn
+
+def style_slider(slider, color="#00ffff"):
+    slider.config(
+        troughcolor="#222222",
+        sliderrelief="flat",
+        bd=0,
+        highlightthickness=0,
+        fg=color,
+        bg="#111111",
+        activebackground=color
+    )
+
+def style_scrollbar(sb, color="#00ffff"):
+    sb.config(
+        troughcolor="#111111",
+        bg=color,
+        activebackground=color,
+        highlightthickness=0,
+        relief="flat"
+    )
+
+def add_hover_glow(slider, normal="#00ffff", hover="#ffffff"):
+    def enter(e): slider.config(fg=hover, activebackground=hover)
+    def leave(e): slider.config(fg=normal, activebackground=normal)
+    slider.bind("<Enter>", enter)
+    slider.bind("<Leave>", leave)
+
 # ---------- Utils ----------
 def write_state(data):
     tmp = STATE_FILE + ".tmp"
@@ -317,7 +382,7 @@ def open_control_window():
         write_state({"mode": mode, "target_pwm": None})
 
     for m in ("auto", "silent", "normal", "performance", "manual"):
-        tk.Radiobutton(
+        Radiobutton = tk.Radiobutton(
             modes_row,
             text=m.upper(),
             variable=mode_var,
@@ -326,7 +391,9 @@ def open_control_window():
             bg="black",
             fg="white",
             selectcolor="black"
-        ).pack(side="left", padx=6)
+        )
+        Radiobutton.pack(side="left", padx=6)
+        style_radiobutton(Radiobutton)
 
     # ======================================================
     # SECCIÓN MANUAL PWM
@@ -354,7 +421,7 @@ def open_control_window():
         width=30
     )
     manual_scale.pack(side="left", fill="x", expand=True)
-
+    style_slider(manual_scale)
     manual_lbl = tk.Label(
         manual_row,
         textvariable=manual_pwm,
@@ -387,11 +454,11 @@ def open_control_window():
     canvas = tk.Canvas(curve_frame, bg="black", highlightthickness=0, height=180)
     canvas.pack(side="left", fill="both", expand=True)
 
-    scrollbar = tk.Scrollbar(curve_frame, orient="vertical", command=canvas.yview)
+    scrollbar = tk.Scrollbar(curve_frame, orient="vertical", command=canvas.yview, width=30)
     scrollbar.pack(side="right", fill="y")
-
     canvas.configure(yscrollcommand=scrollbar.set)
-
+    style_scrollbar(scrollbar)
+    
     curve_inner = tk.Frame(canvas, bg="black")
     canvas.create_window((0, 0), window=curve_inner, anchor="nw")
 
@@ -425,7 +492,7 @@ def open_control_window():
         )
         val_lbl.pack(side="right")
 
-        tk.Scale(
+        scale = tk.Scale(
             row,
             from_=0, to=255,
             orient="horizontal",
@@ -435,9 +502,10 @@ def open_control_window():
             highlightthickness=0,
             length=520,
             sliderlength=28,
-            width=20
-        ).pack(side="left", fill="x", expand=True, padx=6)
-
+            width=30
+        )
+        scale.pack(side="left", fill="x", expand=True, padx=6)
+        style_slider(scale)
         curve_vars.append((p["temp"], var))
 
     # ======================================================
@@ -470,14 +538,10 @@ def open_control_window():
         control_win.destroy()
         open_control_window()
 
-    tk.Button(actions, text="Guardar curva", command=save_curve)\
-        .pack(side="left", padx=10)
 
-    tk.Button(actions, text="Restaurar por defecto", command=restore_default)\
-        .pack(side="left", padx=10)
-
-    tk.Button(actions, text="Cerrar", command=on_control_close)\
-        .pack(side="right", padx=10)
+    make_futuristic_button(actions, "Guardar curva", save_curve, width=16, height=2).pack(side="left", padx=10)
+    make_futuristic_button(actions, "Restaurar por defecto", restore_default, width=16, height=2).pack(side="left", padx=10)
+    make_futuristic_button(actions, "Cerrar", on_control_close, width=12, height=2).pack(side="right", padx=10)
 
 def on_control_close():
     # Remove any global pointer logging and topmost attribute before closing
@@ -515,7 +579,7 @@ actions = tk.LabelFrame(
     pady=6
 )
 actions.pack(fill="x")
-
+"""
 tk.Button(
     actions,
     text="Control ventiladores",
@@ -531,6 +595,11 @@ tk.Button(
     width=12,
     height=2
 ).pack(side="right", padx=10)
+"""
+# Ahora:
+make_futuristic_button(actions, "Control ventiladores", open_control_window, width=20, height=2).pack(side="left", padx=10)
+make_futuristic_button(actions, "Salir", root.destroy, width=12, height=2).pack(side="right", padx=10)
+
 
 
 # ---------- Update ----------
