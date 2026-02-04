@@ -34,7 +34,7 @@ RAM_WARN  = 65
 RAM_CRIT  = 85
 
 # --- FUNCIONES HELPER PARA ESTILO FUTURISTA ---
-def style_radiobutton(rb, fg="#00ffff", bg="#111111", hover_fg="#ffffff"):
+def style_radiobutton(rb, fg="#00ffff", bg="#111111", hover_fg="#1ae313"):
     rb.config(
         fg=fg,
         bg=bg,
@@ -74,7 +74,7 @@ def make_futuristic_button(parent, text, command=None, width=12, height=2):
 
 def style_slider(slider, color="#00ffff"):
     slider.config(
-        troughcolor="#222222",
+        troughcolor="#14611E",
         sliderrelief="flat",
         bd=0,
         highlightthickness=0,
@@ -83,9 +83,9 @@ def style_slider(slider, color="#00ffff"):
         activebackground=color
     )
 
-def style_scrollbar(sb, color="#00ffff"):
+def style_scrollbar(sb, color="#111111"):
     sb.config(
-        troughcolor="#111111",
+        troughcolor="#00ffff",
         bg=color,
         activebackground=color,
         highlightthickness=0,
@@ -97,6 +97,21 @@ def add_hover_glow(slider, normal="#00ffff", hover="#ffffff"):
     def leave(e): slider.config(fg=normal, activebackground=normal)
     slider.bind("<Enter>", enter)
     slider.bind("<Leave>", leave)
+# ---------- Custom message box ----------
+def custom_msgbox(parent, text, title="Info"):
+    popup = tk.Toplevel(parent)
+    popup.overrideredirect(True)  # también sin marco
+    popup.configure(bg="#111111")
+    popup.geometry("300x150+{}+{}".format(parent.winfo_x()+250, parent.winfo_y()+180))
+
+    tk.Label(popup, text=title, fg="#00ffff", bg="#111111", font=("FiraFiraMono Nerd Font", 16, "bold")).pack(pady=(10,0))
+    tk.Label(popup, text=text, fg="white", bg="#111111", font=("FiraFiraMono Nerd Font", 14)).pack(pady=(10,10))
+
+    tk.Button(popup, text="OK", fg="#00ffff", bg="#111111", command=popup.destroy, width=10,height=10).pack(pady=(0,10))
+
+    popup.lift()
+    popup.focus_force()
+    popup.grab_set()
 
 # ---------- Utils ----------
 def write_state(data):
@@ -523,8 +538,7 @@ def open_control_window():
         }
         with open(CURVE_FILE, "w") as f:
             json.dump(data, f, indent=2)
-        messagebox.showinfo("Guardado", "Curva guardada correctamente")
-
+        custom_msgbox(control_win, "Curva guardada correctamente", "Guardado")
     def restore_default():
         default = [
             {"temp": 40, "pwm": 100},

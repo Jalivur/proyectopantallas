@@ -1,0 +1,1 @@
+messagebox.showinfo("Guardado", "Curva guardada correctamente")
