@@ -17,8 +17,8 @@ DSI_X = 1920 - DSI_WIDTH
 DSI_Y = 1080 - DSI_HEIGHT
 
 # ---------- Config ----------
-UPDATE_MS = 1000
-HISTORY = 120
+UPDATE_MS = 2000
+HISTORY = 60
 WIDTH = 800
 HEIGHT = 20
 
@@ -55,7 +55,7 @@ def style_slider(slider, color="#00ffff"):
                   highlightthickness=0, fg=color, bg="#111111", activebackground=color)
 
 def style_scrollbar(sb, color="#111111"):
-    sb.config(troughcolor="#00ffff", bg=color, activebackground=color,
+    sb.config(troughcolor="#14611E", bg=color, activebackground=color,
               highlightthickness=0, relief="flat")
 
 def custom_msgbox(parent, text, title="Info"):
@@ -125,15 +125,46 @@ def get_cpu_temp():
         return 0.0
 
 # ---------- Graph helpers ----------
-def draw_graph(canvas,data,max_val,color):
-    canvas.delete("all")
-    step = WIDTH/(len(data)-1)
-    pts=[]
-    for i,v in enumerate(data):
-        x=i*step; y=HEIGHT-(v/max_val)*HEIGHT
-        pts.append((x,y))
-    for i in range(len(pts)-1):
-        canvas.create_line(*pts[i],*pts[i+1],fill=color,width=2)
+def draw_graph(canvas, data, max_val, color, y_offset=0):
+    step = WIDTH / (len(data) - 1)
+    pts = []
+    for i, v in enumerate(data):
+        x = i * step
+        y = HEIGHT - (v / max_val) * HEIGHT + y_offset
+        pts.append((x, y))
+    for i in range(len(pts) - 1):
+        canvas.create_line(
+            *pts[i], *pts[i+1],
+            fill=color,
+            width=2
+        )
+def init_graph_lines(canvas, history_len, color, width=2):
+    lines = []
+    for _ in range(history_len - 1):
+        lid = canvas.create_line(0, 0, 0, 0, fill=color, width=width)
+        lines.append(lid)
+    return lines
+
+
+def update_graph_lines(canvas, lines, data, max_val, y_offset=0):
+    if not lines:
+        return
+    step = WIDTH / (len(data) - 1)
+    for i in range(len(lines)):
+        v1 = data[i]
+        v2 = data[i + 1]
+
+        x1 = i * step
+        x2 = (i + 1) * step
+
+        y1 = HEIGHT - (v1 / max_val) * HEIGHT + y_offset
+        y2 = HEIGHT - (v2 / max_val) * HEIGHT + y_offset
+
+        canvas.coords(lines[i], x1, y1, x2, y2)
+        
+def recolor_lines(canvas, lines, color):
+    for lid in lines:
+        canvas.itemconfig(lid, fill=color)
 
 def level_color(v,w,c):
     if v<w: return "#00ff00"
@@ -195,7 +226,19 @@ monitor_win=None
 cpu_hist=deque([0]*HISTORY,maxlen=HISTORY)
 ram_hist=deque([0]*HISTORY,maxlen=HISTORY)
 temp_hist=deque([0]*HISTORY,maxlen=HISTORY)
+net_download_hist = deque([0]*HISTORY, maxlen=HISTORY)
+net_upload_hist = deque([0]*HISTORY, maxlen=HISTORY)
+last_net_io = psutil.net_io_counters()
+cpu_lines  = []
+ram_lines  = []
+temp_lines = []
+net_dl_lines = []
+net_ul_lines = []
 
+# Inicializamos las variables de interfaz de red como None
+net_lbl = None
+net_val = None
+net_cvs = None
 # ---------- Layout principal ----------
 main = tk.Frame(root,bg="black"); main.pack(fill="both",expand=True)
 top = tk.Frame(main,bg="black"); top.pack(fill="both",expand=True,padx=6,pady=(6,2))
@@ -274,6 +317,18 @@ def open_monitor_window():
     cpu_lbl,cpu_val,cpu_cvs=make_block(main_frame,"CPU %")
     ram_lbl,ram_val,ram_cvs=make_block(main_frame,"RAM %")
     temp_lbl,temp_val,temp_cvs=make_block(main_frame,"TEMP °C")
+    global net_lbl, net_val, net_cvs
+    net_lbl, net_val, net_cvs = make_block(main_frame, "RED MB/s")
+    net_cvs.config(height=20)  # antes era 20
+    global cpu_lines, ram_lines, temp_lines, net_dl_lines, net_ul_lines
+
+    cpu_lines  = init_graph_lines(cpu_cvs, HISTORY, cpu_lbl.cget("fg"))
+    ram_lines  = init_graph_lines(ram_cvs, HISTORY, ram_lbl.cget("fg"))
+    temp_lines = init_graph_lines(temp_cvs, HISTORY, temp_lbl.cget("fg"))
+
+    net_dl_lines = init_graph_lines(net_cvs, HISTORY, "#00ffff", width=2)
+    net_ul_lines = init_graph_lines(net_cvs, HISTORY, "#ffaa00", width=2)
+
     bottom_frame=tk.Frame(monitor_win,bg="black"); bottom_frame.pack(fill="x",padx=8,pady=6)
     make_futuristic_button(bottom_frame,"Cerrar",lambda: monitor_win.destroy(),width=12,height=2).pack(side="right",padx=10)
 
@@ -313,12 +368,51 @@ def update():
         cpu_c=level_color(cpu,CPU_WARN,CPU_CRIT)
         ram_c=level_color(ram,RAM_WARN,RAM_CRIT)
         tmp_c=level_color(temp,TEMP_WARN,TEMP_CRIT)
-        draw_graph(cpu_cvs,cpu_hist,100,cpu_c)
-        draw_graph(ram_cvs,ram_hist,100,ram_c)
-        draw_graph(temp_cvs,temp_hist,85,tmp_c)
+        recolor_lines(cpu_cvs, cpu_lines, cpu_c)
+        recolor_lines(ram_cvs, ram_lines, ram_c)
+        recolor_lines(temp_cvs, temp_lines, tmp_c)
+        update_graph_lines(cpu_cvs, cpu_lines, cpu_hist, 100)
+        update_graph_lines(ram_cvs, ram_lines, ram_hist, 100)
+        update_graph_lines(temp_cvs, temp_lines, temp_hist, 85)
         cpu_lbl.config(fg=cpu_c); cpu_val.config(text=f"{cpu:4.0f} %",fg=cpu_c)
         ram_lbl.config(fg=ram_c); ram_val.config(text=f"{ram:4.0f} %",fg=ram_c)
         temp_lbl.config(fg=tmp_c); temp_val.config(text=f"{temp:4.1f} °C",fg=tmp_c)
+        
+                # --- Red ---
+        if net_cvs is not None and monitor_win and monitor_win.winfo_exists():
+            global last_net_io
+            net_io = psutil.net_io_counters()
+            download = (net_io.bytes_recv - last_net_io.bytes_recv) / 1024 / 1024  # MB/s
+            upload = (net_io.bytes_sent - last_net_io.bytes_sent) / 1024 / 1024
+            last_net_io = net_io
+
+            net_download_hist.append(download)
+            net_upload_hist.append(upload)
+
+            dl_color = "#00ffff"
+            ul_color = "#ffaa00"
+
+            max_val = max(0.01, max(net_download_hist + net_upload_hist))
+
+            update_graph_lines(
+                net_cvs,
+                net_dl_lines,
+                net_download_hist,
+                max_val,
+                y_offset=-2
+            )
+
+            update_graph_lines(
+                net_cvs,
+                net_ul_lines,
+                net_upload_hist,
+                max_val,
+                y_offset=2
+            )
+
+
+            net_lbl.config(fg="#ffffff")
+            net_val.config(text=f"↓{download:.2f} ↑{upload:.2f}")
 
     root.after(UPDATE_MS,update)
 
