@@ -61,3 +61,7 @@ env/
 # OS
 .DS_Store
 Thumbs.db
+
+# Ignorar todos los JSON generados por la app
+*.json
+
