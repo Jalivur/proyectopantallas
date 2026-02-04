@@ -17,8 +17,8 @@ CURVE_FILE = "/home/jalivur/Documents/proyectyopantallas/fan_curve.json"
 DSI_WIDTH = 800
 DSI_HEIGHT = 480
 # DSI_X/DSI_Y are computed at startup based on current screen resolution
-DSI_X = None
-DSI_Y = None
+DSI_X = 1920 - DSI_WIDTH
+DSI_Y = 1080 - DSI_HEIGHT
 
 # ---------- Config ----------
 UPDATE_MS = 1000   
@@ -133,6 +133,21 @@ root = tk.Tk()
 root.title("System Monitor")
 root.configure(bg="black")
 
+# QUITAR MARCO Y BARRA DE TÍTULO
+root.overrideredirect(True)
+
+# ======================================================
+# MAIN LAYOUT (800x480 friendly)
+# ======================================================
+main = tk.Frame(root, bg="black")
+main.pack(fill="both", expand=True)
+
+top = tk.Frame(main, bg="black")
+top.pack(fill="both", expand=True, padx=10, pady=(10, 6))
+
+bottom = tk.Frame(main, bg="black")
+bottom.pack(fill="x", padx=10, pady=(0, 8))
+
 # Attempt to detect the actual DSI monitor geometry via xrandr (if available) and fall back to simple bottom-right placement
 
 def detect_dsi_geometry():
@@ -194,26 +209,36 @@ def level_color(v, w, c):
     if v < c: return "#ffaa00"
     return "#ff3333"
 
-# ---------- Layout (graphs only) ----------
-frame = tk.Frame(root, bg="black")
-frame.pack(padx=10, pady=10)
 
-def make_block(title):
-    lbl = tk.Label(frame, text=title, fg="white", bg="black", font=font)
+def make_block(parent, title):
+    lbl = tk.Label(parent, text=title, fg="white", bg="black", font=font)
     lbl.pack(anchor="w")
-    val = tk.Label(frame, fg="white", bg="black", font=font_value)
+    val = tk.Label(parent, fg="white", bg="black", font=font_value)
     val.pack(anchor="e")
-    cvs = tk.Canvas(frame, width=WIDTH, height=HEIGHT, bg="black", highlightthickness=0)
+    cvs = tk.Canvas(parent, width=WIDTH, height=HEIGHT, bg="black", highlightthickness=0)
     cvs.pack()
     return lbl, val, cvs
+# ---------- SECCION SISTEMA ----------
+system_frame = tk.LabelFrame(
+    top,
+    text="Sistema",
+    fg="white",
+    bg="black",
+    labelanchor="nw",
+    padx=10,
+    pady=8
+)
+system_frame.pack(fill="both", expand=True)
 
-cpu_lbl, cpu_val, cpu_cvs = make_block("CPU %")
-ram_lbl, ram_val, ram_cvs = make_block("RAM %")
-temp_lbl, temp_val, temp_cvs = make_block("TEMP °C")
+cpu_lbl, cpu_val, cpu_cvs = make_block(system_frame, "CPU %")
+ram_lbl, ram_val, ram_cvs = make_block(system_frame, "RAM %")
+temp_lbl, temp_val, temp_cvs = make_block(system_frame, "TEMP °C")
 
 cpu_hist = deque([0]*HISTORY, maxlen=HISTORY)
 ram_hist = deque([0]*HISTORY, maxlen=HISTORY)
 temp_hist = deque([0]*HISTORY, maxlen=HISTORY)
+
+
 
 # ---------- CONTROL WINDOW ----------
 control_win = None
@@ -234,11 +259,33 @@ def open_control_window():
     control_win = tk.Toplevel(root)
     control_win.title("Fan Control")
     control_win.configure(bg="black")
-    control_win.geometry("780x460")
+
+    # QUITAR MARCO Y BARRA DE TÍTULO
+    control_win.overrideredirect(True)
+
+    # Tamaño fijo
+    CTRL_W = 800
+    CTRL_H = 480
+    control_win.geometry(f"{CTRL_W}x{CTRL_H}")
+
+    # MUY IMPORTANTE: no transient, no topmost todavía
+    control_win.update_idletasks()
+
+    def place_control():
+        x = root.winfo_x()
+        y = root.winfo_y()
+        control_win.geometry(f"{CTRL_W}x{CTRL_H}+{x}+{y}")
+
+        # AHORA sí
+        control_win.transient(root)
+        control_win.lift()
+        control_win.focus_force()
+
+    # Ejecutar DESPUÉS de que el WM haya hecho lo suyo
+    control_win.after_idle(place_control)
+
+
     control_win.resizable(False, False)
-    control_win.transient(root)
-    control_win.attributes("-topmost", True)
-    control_win.protocol("WM_DELETE_WINDOW", on_control_close)
 
     # ======================================================
     # CONTENEDOR PRINCIPAL
@@ -248,7 +295,7 @@ def open_control_window():
 
     top = tk.Frame(main, bg="black")
     top.pack(fill="both", expand=True, padx=6, pady=(6, 2))
-
+    
     bottom = tk.Frame(main, bg="black")
     bottom.pack(fill="x", padx=8, pady=(0, 4))
 
@@ -455,21 +502,36 @@ def on_control_close():
 
 
 
-# ---------- Menu ----------
-menu = tk.Menu(root)
-root.config(menu=menu)
-fan_menu = tk.Menu(menu, tearoff=0)
-menu.add_cascade(label="Ventiladores", menu=fan_menu)
-fan_menu.add_command(label="Control", command=open_control_window)
-fan_menu.add_command(label="Salir", command=root.destroy)
+
 
 # ---------- Toolbar ----------
-toolbar = tk.Frame(root, bg="black", pady=4)
-toolbar.pack(side="top", fill="x")
+actions = tk.LabelFrame(
+    bottom,
+    text="Acciones",
+    fg="white",
+    bg="black",
+    labelanchor="nw",
+    padx=10,
+    pady=6
+)
+actions.pack(fill="x")
 
-# botón grande
-tk.Button(toolbar, text="Control", command=open_control_window, width=12, height=2).pack(side="left", padx=6)
-tk.Button(toolbar, text="Salir", command=root.destroy, width=8, height=2).pack(side="left", padx=6)
+tk.Button(
+    actions,
+    text="Control ventiladores",
+    command=open_control_window,
+    width=20,
+    height=2
+).pack(side="left", padx=10)
+
+tk.Button(
+    actions,
+    text="Salir",
+    command=root.destroy,
+    width=12,
+    height=2
+).pack(side="right", padx=10)
+
 
 # ---------- Update ----------
 def update():
