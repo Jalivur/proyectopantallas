@@ -28,7 +28,14 @@ TEMP_WARN = 60
 TEMP_CRIT = 75
 RAM_WARN  = 65
 RAM_CRIT  = 85
-
+NET_WARN  = 2.0   # MB/s
+NET_CRIT  = 6.0
+NET_INTERFACE = None   # None = auto | "eth0" | "wlan0"
+NET_MAX_MB = 10.0   # eje fijo en MB/s
+NET_MIN_SCALE = 0.5
+NET_MAX_SCALE = 200.0   # límite de seguridad
+NET_IDLE_THRESHOLD = 0.2
+NET_IDLE_RESET_TIME = 15   # segundos
 # ---------- Helper style ----------
 def style_radiobutton(rb, fg="#00ffff", bg="#111111", hover_fg="#1ae313"):
     rb.config(fg=fg, bg=bg, selectcolor=bg, activeforeground=fg, activebackground=bg,
@@ -170,6 +177,20 @@ def level_color(v,w,c):
     if v<w: return "#00ff00"
     if v<c: return "#ffaa00"
     return "#ff3333"
+def net_color(v):
+    if v < NET_WARN:
+        return "#ec0909"
+    if v < NET_CRIT:
+        return "#ffaa00"
+    return "#52f828"
+def smooth(data, n=5):
+    if len(data) < n:
+        return data
+    out = []
+    for i in range(len(data)):
+        start = max(0, i - n + 1)
+        out.append(sum(data[start:i+1]) / (i - start + 1))
+    return out
 
 def make_block(parent,title):
     lbl=tk.Label(parent,text=title,fg="white",bg="black",font=("FiraFiraMono Nerd Font",16))
@@ -179,6 +200,92 @@ def make_block(parent,title):
     cvs=tk.Canvas(parent,width=WIDTH,height=HEIGHT,bg="black",highlightthickness=0)
     cvs.pack()
     return lbl,val,cvs
+
+def get_net_io(interface=None):
+    global last_net_pernic
+
+    stats = psutil.net_io_counters(pernic=True)
+
+    if interface and interface in stats:
+        last_net_pernic = stats
+        return interface, stats[interface]
+
+    best_name = None
+    best_speed = -1
+
+    for name in stats:
+        if name not in last_net_pernic:
+            continue
+
+        curr = stats[name]
+        prev = last_net_pernic[name]
+
+        speed = (
+            (curr.bytes_recv - prev.bytes_recv) +
+            (curr.bytes_sent - prev.bytes_sent)
+        )
+
+        if speed > best_speed:
+            best_speed = speed
+            best_name = name
+
+    last_net_pernic = stats
+
+    if best_name:
+        return best_name, stats[best_name]
+
+    # fallback
+    name = next(iter(stats))
+    return name, stats[name]
+def safe_net_speed(curr, prev):
+    if not prev:
+        return 0.0, 0.0
+
+    dl = curr.bytes_recv - prev.bytes_recv
+    ul = curr.bytes_sent - prev.bytes_sent
+
+    # --- Si el contador bajó → reset ---
+    if dl < 0 or ul < 0:
+        return 0.0, 0.0
+
+    # convertir a MB/s
+    dl = dl / 1024 / 1024
+    ul = ul / 1024 / 1024
+
+    # --- Filtro de picos absurdos ---
+    if dl > 500 or ul > 500:
+        return 0.0, 0.0
+
+    return dl, ul
+
+
+def adaptive_scale(current_max, data):
+    global net_idle_counter
+
+    if not data:
+        return current_max * 0.5
+
+    peak = max(data)
+
+    # --- Subir rápido ---
+    if peak > current_max:
+        net_idle_counter = 0
+        return min(peak * 1.2, NET_MAX_SCALE)
+
+    # --- Detectar tráfico bajo ---
+    if peak < NET_IDLE_THRESHOLD:
+        net_idle_counter += 1
+    else:
+        net_idle_counter = 0
+
+    # --- Reset si lleva tiempo sin tráfico ---
+    if net_idle_counter > NET_IDLE_RESET_TIME:
+        return NET_MIN_SCALE
+
+    # --- Decaimiento progresivo ---
+    new_val = current_max * 0.97
+    return max(new_val, NET_MIN_SCALE)
+
 
 # ---------- Variables globales ----------
 root = tk.Tk()
@@ -226,19 +333,27 @@ monitor_win=None
 cpu_hist=deque([0]*HISTORY,maxlen=HISTORY)
 ram_hist=deque([0]*HISTORY,maxlen=HISTORY)
 temp_hist=deque([0]*HISTORY,maxlen=HISTORY)
-net_download_hist = deque([0]*HISTORY, maxlen=HISTORY)
-net_upload_hist = deque([0]*HISTORY, maxlen=HISTORY)
-last_net_io = psutil.net_io_counters()
 cpu_lines  = []
 ram_lines  = []
 temp_lines = []
+#----Variables para ventana monitor de red----
+net_download_hist = deque([0]*HISTORY, maxlen=HISTORY) 
+net_upload_hist = deque([0]*HISTORY, maxlen=HISTORY) 
+last_used_iface = None
+
+last_net_io = psutil.net_io_counters()
+last_net_pernic = psutil.net_io_counters(pernic=True)
+net_win = None
+net_dynamic_max = 1.0
+net_idle_counter = 0
+
+net_dl_lbl = net_dl_val = net_dl_cvs = None
+net_ul_lbl = net_ul_val = net_ul_cvs = None
 net_dl_lines = []
 net_ul_lines = []
 
-# Inicializamos las variables de interfaz de red como None
-net_lbl = None
-net_val = None
-net_cvs = None
+
+
 # ---------- Layout principal ----------
 main = tk.Frame(root,bg="black"); main.pack(fill="both",expand=True)
 top = tk.Frame(main,bg="black"); top.pack(fill="both",expand=True,padx=6,pady=(6,2))
@@ -303,7 +418,7 @@ def restore_default():
 make_futuristic_button(actions,"Guardar curva",save_curve,width=16,height=2).pack(side="left",padx=10)
 make_futuristic_button(actions,"Restaurar por defecto",restore_default,width=18,height=2).pack(side="left",padx=10)
 
-# ---------- Ventana monitor ----------
+# ---------- Ventana monitor placa ----------
 def open_monitor_window():
     global monitor_win,cpu_lbl,cpu_val,cpu_cvs,ram_lbl,ram_val,ram_cvs,temp_lbl,temp_val,temp_cvs
     if monitor_win and monitor_win.winfo_exists(): monitor_win.lift(); return
@@ -317,23 +432,58 @@ def open_monitor_window():
     cpu_lbl,cpu_val,cpu_cvs=make_block(main_frame,"CPU %")
     ram_lbl,ram_val,ram_cvs=make_block(main_frame,"RAM %")
     temp_lbl,temp_val,temp_cvs=make_block(main_frame,"TEMP °C")
-    global net_lbl, net_val, net_cvs
-    net_lbl, net_val, net_cvs = make_block(main_frame, "RED MB/s")
-    net_cvs.config(height=20)  # antes era 20
-    global cpu_lines, ram_lines, temp_lines, net_dl_lines, net_ul_lines
-
+    global cpu_lines, ram_lines, temp_lines
     cpu_lines  = init_graph_lines(cpu_cvs, HISTORY, cpu_lbl.cget("fg"))
     ram_lines  = init_graph_lines(ram_cvs, HISTORY, ram_lbl.cget("fg"))
     temp_lines = init_graph_lines(temp_cvs, HISTORY, temp_lbl.cget("fg"))
 
-    net_dl_lines = init_graph_lines(net_cvs, HISTORY, "#00ffff", width=2)
-    net_ul_lines = init_graph_lines(net_cvs, HISTORY, "#ffaa00", width=2)
+
 
     bottom_frame=tk.Frame(monitor_win,bg="black"); bottom_frame.pack(fill="x",padx=8,pady=6)
+    make_futuristic_button(
+        bottom_frame, "Red", open_net_window, width=12, height=2
+    ).pack(side="left", padx=10)
     make_futuristic_button(bottom_frame,"Cerrar",lambda: monitor_win.destroy(),width=12,height=2).pack(side="right",padx=10)
 
 make_futuristic_button(actions,"Mostrar gráficas",open_monitor_window,width=14,height=2).pack(side="left",padx=10)
 make_futuristic_button(actions,"Salir",root.destroy,width=12,height=2).pack(side="right",padx=10)
+
+#---------- Ventana monitor de red ----------
+def open_net_window():
+    global net_win
+    global net_dl_lbl, net_dl_val, net_dl_cvs
+    global net_ul_lbl, net_ul_val, net_ul_cvs
+    global net_dl_lines, net_ul_lines
+
+    if net_win and net_win.winfo_exists():
+        net_win.lift()
+        return
+
+    net_win = tk.Toplevel(root)
+    net_win.title("Red")
+    net_win.configure(bg="black")
+    net_win.overrideredirect(True)
+    net_win.geometry(f"{DSI_WIDTH}x{DSI_HEIGHT}+{DSI_X}+{DSI_Y}")
+    net_win.resizable(False, False)
+
+    main_frame = tk.Frame(net_win, bg="black")
+    main_frame.pack(fill="both", expand=True, padx=8, pady=8)
+
+    # Descarga
+    net_dl_lbl, net_dl_val, net_dl_cvs = make_block(main_frame, "DESCARGA MB/s")
+    net_dl_lines = init_graph_lines(net_dl_cvs, HISTORY, "#00ffff")
+
+    # Subida
+    net_ul_lbl, net_ul_val, net_ul_cvs = make_block(main_frame, "SUBIDA MB/s")
+    net_ul_lines = init_graph_lines(net_ul_cvs, HISTORY, "#ffaa00")
+
+    bottom = tk.Frame(net_win, bg="black")
+    bottom.pack(fill="x", pady=6)
+
+    make_futuristic_button(
+        bottom, "Cerrar", lambda: net_win.destroy(), width=12, height=2
+    ).pack(side="right", padx=10)
+
 
 # ---------- Update loop ----------
 def update():
@@ -377,42 +527,62 @@ def update():
         cpu_lbl.config(fg=cpu_c); cpu_val.config(text=f"{cpu:4.0f} %",fg=cpu_c)
         ram_lbl.config(fg=ram_c); ram_val.config(text=f"{ram:4.0f} %",fg=ram_c)
         temp_lbl.config(fg=tmp_c); temp_val.config(text=f"{temp:4.1f} °C",fg=tmp_c)
-        
-                # --- Red ---
-        if net_cvs is not None and monitor_win and monitor_win.winfo_exists():
-            global last_net_io
-            net_io = psutil.net_io_counters()
-            download = (net_io.bytes_recv - last_net_io.bytes_recv) / 1024 / 1024  # MB/s
-            upload = (net_io.bytes_sent - last_net_io.bytes_sent) / 1024 / 1024
+    if net_win and net_win.winfo_exists():
+        global last_net_io, last_used_iface
+
+        used_iface, net_io = get_net_io(NET_INTERFACE)
+
+        # --- Detectar cambio de interfaz ---
+        if used_iface != last_used_iface:
+            last_used_iface = used_iface
+            last_net_io = net_io
+            download = 0.0
+            upload = 0.0
+        else:
+            download, upload = safe_net_speed(net_io, last_net_io)
             last_net_io = net_io
 
-            net_download_hist.append(download)
-            net_upload_hist.append(upload)
 
-            dl_color = "#00ffff"
-            ul_color = "#ffaa00"
+        net_download_hist.append(download)
+        net_upload_hist.append(upload)
+        
+        global net_dynamic_max
 
-            max_val = max(0.01, max(net_download_hist + net_upload_hist))
-
-            update_graph_lines(
-                net_cvs,
-                net_dl_lines,
-                net_download_hist,
-                max_val,
-                y_offset=-2
-            )
-
-            update_graph_lines(
-                net_cvs,
-                net_ul_lines,
-                net_upload_hist,
-                max_val,
-                y_offset=2
-            )
+        combined = list(net_download_hist) + list(net_upload_hist)
+        net_dynamic_max = adaptive_scale(net_dynamic_max, combined)
 
 
-            net_lbl.config(fg="#ffffff")
-            net_val.config(text=f"↓{download:.2f} ↑{upload:.2f}")
+        smooth_dl = smooth(list(net_download_hist), 6)
+        smooth_ul = smooth(list(net_upload_hist), 6)
+
+
+        update_graph_lines(
+            net_dl_cvs,
+            net_dl_lines,
+            smooth_dl,
+            net_dynamic_max
+        )
+
+        update_graph_lines(
+            net_ul_cvs,
+            net_ul_lines,
+            smooth_ul,
+            net_dynamic_max
+        )
+
+
+        dl_c = net_color(download)
+        ul_c = net_color(upload)
+
+        recolor_lines(net_dl_cvs, net_dl_lines, dl_c)
+        recolor_lines(net_ul_cvs, net_ul_lines, ul_c)
+
+        net_dl_lbl.config(fg=dl_c, text=f"DESCARGA MB/s ({used_iface})")
+        net_dl_val.config(fg=dl_c, text=f"{download:5.2f} MB/s |  Escala {net_dynamic_max:.1f}")
+        net_ul_lbl.config(fg=ul_c, text=f"SUBIDA MB/s ({used_iface})")
+        net_ul_val.config(fg=ul_c, text=f"{upload:5.2f} MB/s |  Escala {net_dynamic_max:.1f}")
+
+
 
     root.after(UPDATE_MS,update)
 
