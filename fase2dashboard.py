@@ -4,6 +4,7 @@ import subprocess
 from collections import deque
 import json
 import os
+import socket
 import logging
 
 # ---------- Archivos ----------
@@ -287,6 +288,20 @@ def adaptive_scale(current_max, data):
     return max(new_val, NET_MIN_SCALE)
 
 
+def get_interfaces_ips():
+    """
+    Retorna un diccionario: { "eth0": "192.168.1.5", "wlan0": "192.168.1.10", ... }
+    """
+    result = {}
+    addrs = psutil.net_if_addrs()
+    for iface, addr_list in addrs.items():
+        for addr in addr_list:
+            # AF_INET = IPv4
+            if addr.family == socket.AF_INET:
+                result[iface] = addr.address
+    return result
+
+
 # ---------- Variables globales ----------
 root = tk.Tk()
 root.title("Fan Control")
@@ -324,7 +339,7 @@ else:
 CTRL_W, CTRL_H = 800,480
 root.geometry(f"{CTRL_W}x{CTRL_H}+{DSI_X}+{DSI_Y}")
 root.resizable(False,False)
-
+#---------- Variables Ventana Monitor ----------
 mode_var = tk.StringVar(value="auto")
 manual_pwm = tk.IntVar(value=128)
 curve_vars=[]
@@ -336,6 +351,23 @@ temp_hist=deque([0]*HISTORY,maxlen=HISTORY)
 cpu_lines  = []
 ram_lines  = []
 temp_lines = []
+disk_lbl = None
+disk_val = None
+disk_cvs = None
+disk_hist = deque([0]*HISTORY, maxlen=HISTORY)
+disk_lines = []
+disk_read_hist = deque([0]*HISTORY, maxlen=HISTORY)
+disk_write_hist = deque([0]*HISTORY, maxlen=HISTORY)
+last_disk_io = psutil.disk_io_counters()
+disk_write_lvl = None
+disk_write_val = None
+disk_read_lvl = None
+disk_read_val = None
+disk_write_lines = []
+disk_read_lines = []
+disk_write_cvs = None
+disk_read_cvs = None
+
 #----Variables para ventana monitor de red----
 net_download_hist = deque([0]*HISTORY, maxlen=HISTORY) 
 net_upload_hist = deque([0]*HISTORY, maxlen=HISTORY) 
@@ -351,8 +383,13 @@ net_dl_lbl = net_dl_val = net_dl_cvs = None
 net_ul_lbl = net_ul_val = net_ul_cvs = None
 net_dl_lines = []
 net_ul_lines = []
+# Variables para ventana de red
+net_iface_labels = {}  # diccionario: iface -> Label widget
+ips_frame = None       # frame donde estarán las IPs
 
+#--- Variables para ventana monitor de disco ---
 
+#-- ---
 
 # ---------- Layout principal ----------
 main = tk.Frame(root,bg="black"); main.pack(fill="both",expand=True)
@@ -428,18 +465,44 @@ def open_monitor_window():
     monitor_win.overrideredirect(True)
     monitor_win.geometry(f"{DSI_WIDTH}x{DSI_HEIGHT}+{DSI_X}+{DSI_Y}")
     monitor_win.resizable(False,False)
-    main_frame=tk.Frame(monitor_win,bg="black"); main_frame.pack(fill="both",expand=True)
-    cpu_lbl,cpu_val,cpu_cvs=make_block(main_frame,"CPU %")
-    ram_lbl,ram_val,ram_cvs=make_block(main_frame,"RAM %")
-    temp_lbl,temp_val,temp_cvs=make_block(main_frame,"TEMP °C")
+    main_frame = tk.Frame(monitor_win, bg="black")
+    main_frame.pack(fill="both", expand=True)
+    section_hw = tk.Frame(main_frame, bg="black")
+    section_hw.pack(fill="both", expand=True, pady=(0, 10))
+    hw_canvas = tk.Canvas(
+    section_hw,
+    bg="black",
+    highlightthickness=0
+    )
+    hw_canvas.pack(side="left", fill="both", expand=True)
+    hw_scrollbar=tk.Scrollbar(section_hw,orient="vertical",command=hw_canvas.yview,width=30) 
+    hw_scrollbar.pack(side="right",fill="y")
+    hw_canvas.configure(yscrollcommand=hw_scrollbar.set)
+    style_scrollbar(hw_scrollbar)
+    hw_inner = tk.Frame(hw_canvas, bg="black")
+    hw_canvas.create_window((0, 0), window=hw_inner, anchor="nw", width=DSI_WIDTH-35)
+    def _on_hw_configure(event):
+        hw_canvas.configure(scrollregion=hw_canvas.bbox("all"))
+    hw_inner.bind("<Configure>", _on_hw_configure)
+    cpu_lbl,cpu_val,cpu_cvs=make_block(hw_inner,"CPU %")
+    ram_lbl,ram_val,ram_cvs=make_block(hw_inner,"RAM %")
+    temp_lbl,temp_val,temp_cvs=make_block(hw_inner,"TEMP °C")
     global cpu_lines, ram_lines, temp_lines
     cpu_lines  = init_graph_lines(cpu_cvs, HISTORY, cpu_lbl.cget("fg"))
     ram_lines  = init_graph_lines(ram_cvs, HISTORY, ram_lbl.cget("fg"))
     temp_lines = init_graph_lines(temp_cvs, HISTORY, temp_lbl.cget("fg"))
-
-
-
-    bottom_frame=tk.Frame(monitor_win,bg="black"); bottom_frame.pack(fill="x",padx=8,pady=6)
+    global disk_lbl, disk_val, disk_cvs, disk_lines
+    disk_lbl, disk_val, disk_cvs = make_block(hw_inner, "DISK %")
+    disk_lines = init_graph_lines(disk_cvs, HISTORY, disk_lbl.cget("fg"))
+    global disk_write_lvl, disk_write_val, disk_read_lvl, disk_read_val, disk_write_lines, disk_read_lines, disk_write_cvs, disk_read_cvs
+    disk_write_lvl, disk_write_val, disk_write_cvs = make_block(hw_inner, "DISK WRITE MB/s")
+    disk_read_lvl, disk_read_val, disk_read_cvs = make_block(hw_inner, "DISK READ MB/s")
+    disk_write_lines = init_graph_lines(disk_write_cvs, HISTORY, disk_write_lvl.cget("fg"))
+    disk_read_lines = init_graph_lines(disk_read_cvs, HISTORY, disk_read_lvl.cget("fg"))
+    
+    section_bottom = tk.Frame(main_frame, bg="black")
+    section_bottom.pack(fill="x")
+    bottom_frame=tk.Frame(section_bottom,bg="black"); bottom_frame.pack(fill="x",padx=8,pady=6)
     make_futuristic_button(
         bottom_frame, "Red", open_net_window, width=12, height=2
     ).pack(side="left", padx=10)
@@ -467,15 +530,41 @@ def open_net_window():
     net_win.resizable(False, False)
 
     main_frame = tk.Frame(net_win, bg="black")
-    main_frame.pack(fill="both", expand=True, padx=8, pady=8)
+    main_frame.pack(fill="both", expand=True)
+    
+    net_section = tk.Frame(main_frame, bg="black")
+    net_section.pack(fill="both", expand=True, pady=(0, 10))
+    
+    net_canvas = tk.Canvas(net_section, bg="black", highlightthickness=0)
+    net_canvas.pack(side="left", fill="both", expand=True)
+    net_scrollbar = tk.Scrollbar(net_section, orient="vertical", command=net_canvas.yview, width=30)
+    net_scrollbar.pack(side="right", fill="y")
+    style_scrollbar(net_scrollbar)
+    net_canvas.configure(yscrollcommand=net_scrollbar.set)
+    net_inner = tk.Frame(net_canvas, bg="black")
+    net_canvas.create_window((0, 0), window=net_inner, anchor="nw", width=DSI_WIDTH-35)
+    def _on_net_configure(event):
+        net_canvas.configure(scrollregion=net_canvas.bbox("all"))
+    net_inner.bind("<Configure>", _on_net_configure)
+    
 
-    # Descarga
-    net_dl_lbl, net_dl_val, net_dl_cvs = make_block(main_frame, "DESCARGA MB/s")
+    net_dl_lbl, net_dl_val, net_dl_cvs = make_block(net_inner, "DESCARGA MB/s")
     net_dl_lines = init_graph_lines(net_dl_cvs, HISTORY, "#00ffff")
 
     # Subida
-    net_ul_lbl, net_ul_val, net_ul_cvs = make_block(main_frame, "SUBIDA MB/s")
+    net_ul_lbl, net_ul_val, net_ul_cvs = make_block(net_inner, "SUBIDA MB/s")
     net_ul_lines = init_graph_lines(net_ul_cvs, HISTORY, "#ffaa00")
+    # Bloque de IPs dentro de net_section
+    ips_frame = tk.Frame(net_inner, bg="black")
+    ips_frame.pack(fill="x", pady=(0, 10))  # mismo espaciado que los bloques de gráficas
+
+    tk.Label(ips_frame, text="Interfaces y IPs:", fg="#14611E", bg="black",
+            font=("FiraFiraMono Nerd Font", 20, "bold")).pack(anchor="w")
+
+    iface_ips = get_interfaces_ips()
+    for iface, ip in iface_ips.items():
+        tk.Label(ips_frame, text=f"{iface}: {ip}", fg="#00ffff", bg="black",
+                font=("FiraFiraMono Nerd Font", 18)).pack(anchor="w")
 
     bottom = tk.Frame(net_win, bg="black")
     bottom.pack(fill="x", pady=6)
@@ -487,7 +576,7 @@ def open_net_window():
 
 # ---------- Update loop ----------
 def update():
-    global last_state
+    global last_state, last_disk_io
     try:
         st=load_state()
         if st!=last_state:
@@ -497,8 +586,13 @@ def update():
             if isinstance(tp,int): manual_pwm.set(tp)
     except: pass
 
-    cpu=psutil.cpu_percent(); ram=psutil.virtual_memory().percent; temp=get_cpu_temp()
+    cpu=psutil.cpu_percent(); ram=psutil.virtual_memory().percent; temp=get_cpu_temp();
+    disk_io = psutil.disk_io_counters()
 
+    disk_read = (disk_io.read_bytes - last_disk_io.read_bytes)
+    disk_write = (disk_io.write_bytes - last_disk_io.write_bytes)
+
+    last_disk_io = disk_io
     try:
         st=load_state()
         mode=st.get("mode","auto"); current_target=st.get("target_pwm")
@@ -527,6 +621,45 @@ def update():
         cpu_lbl.config(fg=cpu_c); cpu_val.config(text=f"{cpu:4.0f} %",fg=cpu_c)
         ram_lbl.config(fg=ram_c); ram_val.config(text=f"{ram:4.0f} %",fg=ram_c)
         temp_lbl.config(fg=tmp_c); temp_val.config(text=f"{temp:4.1f} °C",fg=tmp_c)
+        disk = psutil.disk_usage('/').percent
+        disk_hist.append(disk)
+        disk_c = level_color(disk, 60, 80)
+        recolor_lines(disk_cvs, disk_lines, disk_c)
+        update_graph_lines(
+            disk_cvs,
+            disk_lines,
+            disk_hist,
+            100
+        )
+        disk_lbl.config(fg=disk_c)
+        disk_val.config(text=f"{disk:.0f} %", fg=disk_c)
+        disk_write_mb = disk_write / 1024 / 1024
+        disk_read_mb = disk_read / 1024 / 1024
+        disk_write_hist.append(disk_write_mb)
+        disk_read_hist.append(disk_read_mb)
+        write_c = level_color(disk_write_mb, 10, 50)
+        read_c = level_color(disk_read_mb, 10, 50)
+        recolor_lines(disk_write_cvs, disk_write_lines, write_c)
+        recolor_lines(disk_read_cvs, disk_read_lines, read_c)
+        update_graph_lines(
+            disk_write_cvs,
+            disk_write_lines,
+            disk_write_hist,
+            100
+        )
+        update_graph_lines( 
+            disk_read_cvs,
+            disk_read_lines,
+            disk_read_hist,
+            100
+        )
+        disk_write_lvl.config(fg=write_c)
+        disk_write_val.config(text=f"{disk_write_mb:.2f} MB/s", fg=write_c)
+        disk_read_lvl.config(fg=read_c)
+        disk_read_val.config(text=f"{disk_read_mb:.2f} MB/s", fg=read_c)
+       
+        
+
     if net_win and net_win.winfo_exists():
         global last_net_io, last_used_iface
 
@@ -578,10 +711,18 @@ def update():
         recolor_lines(net_ul_cvs, net_ul_lines, ul_c)
 
         net_dl_lbl.config(fg=dl_c, text=f"DESCARGA MB/s ({used_iface})")
-        net_dl_val.config(fg=dl_c, text=f"{download:5.2f} MB/s |  Escala {net_dynamic_max:.1f}")
+        net_dl_val.config(fg=dl_c, text=f"{download:5.2f} MB/s | Escala: {net_dynamic_max:.1f} MB/s")
         net_ul_lbl.config(fg=ul_c, text=f"SUBIDA MB/s ({used_iface})")
-        net_ul_val.config(fg=ul_c, text=f"{upload:5.2f} MB/s |  Escala {net_dynamic_max:.1f}")
-
+        net_ul_val.config(fg=ul_c, text=f"{upload:5.2f} MB/s | Escala: {net_dynamic_max:.1f} MB/s")
+        iface_ips = get_interfaces_ips()
+        for iface, ip in iface_ips.items():
+            if iface in net_iface_labels:
+                net_iface_labels[iface].config(text=f"{iface}: {ip}")
+            else:
+                lbl = tk.Label(ips_frame, text=f"{iface}: {ip}", fg="#00ffff", bg="black",
+                            font=("FiraFiraMono Nerd Font", 14))
+                lbl.pack(anchor="w")
+                net_iface_labels[iface] = lbl
 
 
     root.after(UPDATE_MS,update)
