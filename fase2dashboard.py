@@ -223,6 +223,10 @@ def make_block(parent,title):
 # ---------- Network helpers ----------
 # -----------------------------
 def get_net_io(interface=None):
+    """
+    Retorna la interfaz usada y sus stats.
+    Evita picos absurdos y mantiene el historial correcto.
+    """
     global last_net_pernic
 
     stats = psutil.net_io_counters(pernic=True)
@@ -245,6 +249,10 @@ def get_net_io(interface=None):
             (curr.bytes_recv - prev.bytes_recv) +
             (curr.bytes_sent - prev.bytes_sent)
         )
+
+        # --- Evitar picos absurdos ---
+        if speed < 0 or speed > 500*1024*1024:  # 500 MB en intervalo
+            continue
 
         if speed > best_speed:
             best_speed = speed
@@ -281,6 +289,10 @@ def safe_net_speed(curr, prev):
     return dl, ul
 
 def adaptive_scale(current_max, data):
+    """
+    Ajusta escala dinámica, sube rápido con tráfico real,
+    baja progresivamente y se reinicia si hay inactividad.
+    """
     global net_idle_counter
 
     if not data:
@@ -288,7 +300,7 @@ def adaptive_scale(current_max, data):
 
     peak = max(data)
 
-    # --- Subir rápido ---
+    # --- Subir rápido si hay tráfico real ---
     if peak > current_max:
         net_idle_counter = 0
         return min(peak * 1.2, NET_MAX_SCALE)
@@ -304,8 +316,9 @@ def adaptive_scale(current_max, data):
         return NET_MIN_SCALE
 
     # --- Decaimiento progresivo ---
-    new_val = current_max * 0.97
+    new_val = current_max * 0.90
     return max(new_val, NET_MIN_SCALE)
+
 
 def get_interfaces_ips():
     """
@@ -363,7 +376,7 @@ disk_read_cvs = None
 net_download_hist = deque([0]*HISTORY, maxlen=HISTORY) 
 net_upload_hist = deque([0]*HISTORY, maxlen=HISTORY) 
 last_used_iface = None
-last_net_io = psutil.net_io_counters()
+last_net_io = {}
 last_net_pernic = psutil.net_io_counters(pernic=True)
 net_win = None
 net_dynamic_max = 1.0
@@ -730,28 +743,35 @@ def update():
         disk_write_val.config(text=f"{disk_write_mb:.1f} MB/s", fg=write_c)
         disk_read_val.config(text=f"{disk_read_mb:.1f} MB/s", fg=read_c)
 
-    # --- Red ---
     if net_win and net_win.winfo_exists():
         iface, stats = get_net_io(NET_INTERFACE)
-        dl, ul = safe_net_speed(stats, last_net_io)
-        last_net_io = stats
+
+        prev = last_net_io.get(iface)
+        dl, ul = safe_net_speed(stats, prev)
+
+        last_net_io[iface] = stats
+        last_used_iface = iface
+
         net_download_hist.append(dl)
         net_upload_hist.append(ul)
-        net_dynamic_max = adaptive_scale(net_dynamic_max, list(net_download_hist)+list(net_upload_hist))
+
+        net_dynamic_max = adaptive_scale(
+            net_dynamic_max,
+            list(net_download_hist) + list(net_upload_hist)
+        )
+
         recolor_lines(net_dl_cvs, net_dl_lines, net_color(dl))
         recolor_lines(net_ul_cvs, net_ul_lines, net_color(ul))
-        update_graph_lines(net_dl_cvs, net_dl_lines, net_download_hist, net_dynamic_max,)
+        update_graph_lines(net_dl_cvs, net_dl_lines, net_download_hist, net_dynamic_max)
         update_graph_lines(net_ul_cvs, net_ul_lines, net_upload_hist, net_dynamic_max)
-        net_dl_lbl.config(fg=net_color(dl))
-        net_ul_lbl.config(fg=net_color(ul))
+
+        net_dl_lbl.config(text=f"DESCARGA MB/s ({iface})", fg=net_color(dl))
+        net_ul_lbl.config(text=f"SUBIDA MB/s ({iface})", fg=net_color(ul))
         net_dl_val.config(text=f"{dl:.2f} MB/s | Escala: {net_dynamic_max:.2f}", fg=net_color(dl))
         net_ul_val.config(text=f"{ul:.2f} MB/s | Escala: {net_dynamic_max:.2f}", fg=net_color(ul))
 
-        # actualizar IPs
-        iface_ips = get_interfaces_ips()
-        for iface, lbl in net_iface_labels.items():
-            ip = iface_ips.get(iface,"-")
-            lbl.config(text=f"{iface}: {ip}")
+
+
 
     root.after(UPDATE_MS, update)
 
