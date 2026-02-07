@@ -7,17 +7,23 @@ import os
 import socket
 import logging
 
+# -----------------------------
 # ---------- Archivos ----------
+# -----------------------------
 STATE_FILE = "/home/jalivur/Documents/proyectyopantallas/fan_state.json"
 CURVE_FILE = "/home/jalivur/Documents/proyectyopantallas/fan_curve.json"
 
+# -----------------------------
 # ---------- DSI display config ----------
+# -----------------------------
 DSI_WIDTH = 800
 DSI_HEIGHT = 480
 DSI_X = 1920 - DSI_WIDTH
 DSI_Y = 1080 - DSI_HEIGHT
 
+# -----------------------------
 # ---------- Config ----------
+# -----------------------------
 UPDATE_MS = 2000
 HISTORY = 60
 WIDTH = 800
@@ -37,7 +43,10 @@ NET_MIN_SCALE = 0.5
 NET_MAX_SCALE = 200.0   # límite de seguridad
 NET_IDLE_THRESHOLD = 0.2
 NET_IDLE_RESET_TIME = 15   # segundos
+
+# -----------------------------
 # ---------- Helper style ----------
+# -----------------------------
 def style_radiobutton(rb, fg="#00ffff", bg="#111111", hover_fg="#1ae313"):
     rb.config(fg=fg, bg=bg, selectcolor=bg, activeforeground=fg, activebackground=bg,
               font=("FiraFiraMono Nerd Font", 14, "bold"), indicatoron=True)
@@ -76,7 +85,9 @@ def custom_msgbox(parent, text, title="Info"):
     tk.Button(popup, text="OK", fg="#00ffff", bg="#111111", command=popup.destroy, width=10,height=10).pack(pady=(0,10))
     popup.lift(); popup.focus_force(); popup.grab_set()
 
+# -----------------------------
 # ---------- Utils ----------
+# -----------------------------
 def write_state(data):
     tmp = STATE_FILE + ".tmp"
     with open(tmp,"w") as f: json.dump(data,f)
@@ -124,7 +135,9 @@ def compute_pwm_from_curve(temp):
             return int(p1+r*(p2-p1))
     return int(curve[-1]["pwm"])
 
+# -----------------------------
 # ---------- Sensors ----------
+# -----------------------------
 def get_cpu_temp():
     try:
         out=subprocess.check_output(["vcgencmd","measure_temp"]).decode()
@@ -132,7 +145,9 @@ def get_cpu_temp():
     except:
         return 0.0
 
+# -----------------------------
 # ---------- Graph helpers ----------
+# -----------------------------
 def draw_graph(canvas, data, max_val, color, y_offset=0):
     step = WIDTH / (len(data) - 1)
     pts = []
@@ -146,13 +161,13 @@ def draw_graph(canvas, data, max_val, color, y_offset=0):
             fill=color,
             width=2
         )
+
 def init_graph_lines(canvas, history_len, color, width=2):
     lines = []
     for _ in range(history_len - 1):
         lid = canvas.create_line(0, 0, 0, 0, fill=color, width=width)
         lines.append(lid)
     return lines
-
 
 def update_graph_lines(canvas, lines, data, max_val, y_offset=0):
     if not lines:
@@ -178,12 +193,14 @@ def level_color(v,w,c):
     if v<w: return "#00ff00"
     if v<c: return "#ffaa00"
     return "#ff3333"
+
 def net_color(v):
     if v < NET_WARN:
         return "#ec0909"
     if v < NET_CRIT:
         return "#ffaa00"
     return "#52f828"
+
 def smooth(data, n=5):
     if len(data) < n:
         return data
@@ -202,6 +219,9 @@ def make_block(parent,title):
     cvs.pack()
     return lbl,val,cvs
 
+# -----------------------------
+# ---------- Network helpers ----------
+# -----------------------------
 def get_net_io(interface=None):
     global last_net_pernic
 
@@ -238,6 +258,7 @@ def get_net_io(interface=None):
     # fallback
     name = next(iter(stats))
     return name, stats[name]
+
 def safe_net_speed(curr, prev):
     if not prev:
         return 0.0, 0.0
@@ -258,7 +279,6 @@ def safe_net_speed(curr, prev):
         return 0.0, 0.0
 
     return dl, ul
-
 
 def adaptive_scale(current_max, data):
     global net_idle_counter
@@ -287,7 +307,6 @@ def adaptive_scale(current_max, data):
     new_val = current_max * 0.97
     return max(new_val, NET_MIN_SCALE)
 
-
 def get_interfaces_ips():
     """
     Retorna un diccionario: { "eth0": "192.168.1.5", "wlan0": "192.168.1.10", ... }
@@ -301,56 +320,28 @@ def get_interfaces_ips():
                 result[iface] = addr.address
     return result
 
-
+# -----------------------------
 # ---------- Variables globales ----------
+# -----------------------------
 root = tk.Tk()
 root.title("Fan Control")
 root.configure(bg="black")
 root.overrideredirect(True)
 
-# ---------- Posicionamiento DSI para root ----------
-def detect_dsi_geometry():
-    try:
-        out=subprocess.check_output(["xrandr","--query"],stderr=subprocess.DEVNULL).decode()
-        for line in out.splitlines():
-            if " connected " in line:
-                parts=line.split()
-                for tok in parts:
-                    if "+" in tok and "x" in tok:
-                        try:
-                            res,pos=tok.split("+",1)
-                            w,h=map(int,res.split("x"))
-                            x,y=map(int,pos.split("+"))
-                            if w==DSI_WIDTH and h==DSI_HEIGHT:
-                                return x,y
-                        except: pass
-        return None
-    except: return None
-
-pos = detect_dsi_geometry()
-if pos:
-    DSI_X,DSI_Y=pos
-else:
-    screen_w=root.winfo_screenwidth()
-    screen_h=root.winfo_screenheight()
-    DSI_X = max(0, screen_w - DSI_WIDTH)
-    DSI_Y = max(0, screen_h - DSI_HEIGHT)
-
-CTRL_W, CTRL_H = 800,480
-root.geometry(f"{CTRL_W}x{CTRL_H}+{DSI_X}+{DSI_Y}")
-root.resizable(False,False)
-#---------- Variables Ventana Monitor ----------
+# Variables de control
 mode_var = tk.StringVar(value="auto")
 manual_pwm = tk.IntVar(value=128)
 curve_vars=[]
 last_state=None
-monitor_win=None
+monitor_win = None
+# Históricos y líneas gráficas
 cpu_hist=deque([0]*HISTORY,maxlen=HISTORY)
 ram_hist=deque([0]*HISTORY,maxlen=HISTORY)
 temp_hist=deque([0]*HISTORY,maxlen=HISTORY)
 cpu_lines  = []
 ram_lines  = []
 temp_lines = []
+
 disk_lbl = None
 disk_val = None
 disk_cvs = None
@@ -368,155 +359,242 @@ disk_read_lines = []
 disk_write_cvs = None
 disk_read_cvs = None
 
-#----Variables para ventana monitor de red----
+# Red
 net_download_hist = deque([0]*HISTORY, maxlen=HISTORY) 
 net_upload_hist = deque([0]*HISTORY, maxlen=HISTORY) 
 last_used_iface = None
-
 last_net_io = psutil.net_io_counters()
 last_net_pernic = psutil.net_io_counters(pernic=True)
 net_win = None
 net_dynamic_max = 1.0
 net_idle_counter = 0
-
 net_dl_lbl = net_dl_val = net_dl_cvs = None
 net_ul_lbl = net_ul_val = net_ul_cvs = None
 net_dl_lines = []
 net_ul_lines = []
-# Variables para ventana de red
 net_iface_labels = {}  # diccionario: iface -> Label widget
 ips_frame = None       # frame donde estarán las IPs
 
-#--- Variables para ventana monitor de disco ---
 
-#-- ---
 
+# -----------------------------
+# ---------- Posicionamiento DSI para root ----------
+# -----------------------------
+def detect_dsi_geometry():
+    """
+    Detecta la posición del DSI conectado y devuelve (x, y).
+    Si no encuentra, devuelve None.
+    """
+    try:
+        out = subprocess.check_output(["xrandr","--query"], stderr=subprocess.DEVNULL).decode()
+        for line in out.splitlines():
+            if " connected " in line:
+                parts = line.split()
+                for tok in parts:
+                    if "+" in tok and "x" in tok:
+                        try:
+                            res,pos = tok.split("+",1)
+                            w,h = map(int,res.split("x"))
+                            x,y = map(int,pos.split("+"))
+                            if w==DSI_WIDTH and h==DSI_HEIGHT:
+                                return x,y
+                        except: pass
+        return None
+    except:
+        return None
+
+pos = detect_dsi_geometry()
+if pos:
+    DSI_X, DSI_Y = pos
+else:
+    screen_w = root.winfo_screenwidth()
+    screen_h = root.winfo_screenheight()
+    DSI_X = max(0, screen_w - DSI_WIDTH)
+    DSI_Y = max(0, screen_h - DSI_HEIGHT)
+
+CTRL_W, CTRL_H = 800, 480
+root.geometry(f"{CTRL_W}x{CTRL_H}+{DSI_X}+{DSI_Y}")
+root.resizable(False, False)
+
+# -----------------------------
 # ---------- Layout principal ----------
-main = tk.Frame(root,bg="black"); main.pack(fill="both",expand=True)
-top = tk.Frame(main,bg="black"); top.pack(fill="both",expand=True,padx=6,pady=(6,2))
-bottom = tk.Frame(main,bg="black"); bottom.pack(fill="x",padx=8,pady=(0,4))
+# -----------------------------
+main = tk.Frame(root, bg="black"); main.pack(fill="both", expand=True)
+top = tk.Frame(main, bg="black"); top.pack(fill="both", expand=True, padx=6, pady=(6,2))
+bottom = tk.Frame(main, bg="black"); bottom.pack(fill="x", padx=8, pady=(0,4))
 
+# -----------------------------
 # ---------- Modo ----------
-mode_frame = tk.LabelFrame(top,text="Modo",fg="white",bg="black",labelanchor="nw",padx=10,pady=8)
-mode_frame.pack(fill="x",pady=4)
-modes_row = tk.Frame(mode_frame,bg="black"); modes_row.pack(anchor="w")
+# -----------------------------
+mode_frame = tk.LabelFrame(top, text="Modo", fg="white", bg="black", labelanchor="nw", padx=10, pady=8)
+mode_frame.pack(fill="x", pady=4)
+modes_row = tk.Frame(mode_frame, bg="black"); modes_row.pack(anchor="w")
 
 def set_mode(mode):
+    """Actualiza modo y guarda en estado"""
     mode_var.set(mode)
     write_state({"mode":mode,"target_pwm":None})
 
 for m in ("auto","silent","normal","performance","manual"):
-    rb=tk.Radiobutton(modes_row,text=m.upper(),variable=mode_var,value=m,command=lambda m=m:set_mode(m),bg="black",fg="white",selectcolor="black")
-    rb.pack(side="left",padx=6)
+    rb = tk.Radiobutton(modes_row, text=m.upper(), variable=mode_var, value=m,
+                        command=lambda m=m: set_mode(m), bg="black", fg="white", selectcolor="black")
+    rb.pack(side="left", padx=6)
     style_radiobutton(rb)
 
+# -----------------------------
 # ---------- PWM Manual ----------
-manual_frame = tk.LabelFrame(top,text="Control manual PWM",fg="white",bg="black",labelanchor="nw",padx=10,pady=8)
-manual_frame.pack(fill="x",pady=4)
-manual_row=tk.Frame(manual_frame,bg="black"); manual_row.pack(fill="x")
-manual_scale=tk.Scale(manual_row,from_=0,to=255,orient="horizontal",variable=manual_pwm,bg="black",fg="white",highlightthickness=0,length=560,sliderlength=36,width=30)
-manual_scale.pack(side="left",fill="x",expand=True)
+# -----------------------------
+manual_frame = tk.LabelFrame(top, text="Control manual PWM", fg="white", bg="black", labelanchor="nw", padx=10, pady=8)
+manual_frame.pack(fill="x", pady=4)
+manual_row = tk.Frame(manual_frame, bg="black"); manual_row.pack(fill="x")
+
+manual_scale = tk.Scale(manual_row, from_=0, to=255, orient="horizontal", variable=manual_pwm,
+                        bg="black", fg="white", highlightthickness=0, length=560, sliderlength=36, width=30)
+manual_scale.pack(side="left", fill="x", expand=True)
 style_slider(manual_scale)
-manual_lbl=tk.Label(manual_row,textvariable=manual_pwm,fg="white",bg="black",width=4,font=("FiraFiraMono Nerd Font",20,"bold"))
-manual_lbl.pack(side="left",padx=12)
+
+manual_lbl = tk.Label(manual_row, textvariable=manual_pwm, fg="white", bg="black", width=4,
+                      font=("FiraFiraMono Nerd Font", 20, "bold"))
+manual_lbl.pack(side="left", padx=12)
+
+# Al mover el slider, si estamos en manual, actualizamos el estado
 manual_scale.configure(command=lambda val: write_state({"mode":"manual","target_pwm":max(0,min(255,int(float(val))))}) if mode_var.get()=="manual" else None)
 
+# -----------------------------
 # ---------- Curva ----------
-curve_frame = tk.LabelFrame(top,text="Curva térmica",fg="white",bg="black",labelanchor="nw",padx=10,pady=8)
-curve_frame.pack(fill="both",expand=True,pady=4)
-canvas=tk.Canvas(curve_frame,bg="black",highlightthickness=0,height=180); canvas.pack(side="left",fill="both",expand=True)
-scrollbar=tk.Scrollbar(curve_frame,orient="vertical",command=canvas.yview,width=30); scrollbar.pack(side="right",fill="y")
+# -----------------------------
+curve_frame = tk.LabelFrame(top, text="Curva térmica", fg="white", bg="black", labelanchor="nw", padx=10, pady=8)
+curve_frame.pack(fill="both", expand=True, pady=4)
+
+canvas = tk.Canvas(curve_frame, bg="black", highlightthickness=0, height=180)
+canvas.pack(side="left", fill="both", expand=True)
+
+scrollbar = tk.Scrollbar(curve_frame, orient="vertical", command=canvas.yview, width=30)
+scrollbar.pack(side="right", fill="y")
 canvas.configure(yscrollcommand=scrollbar.set)
 style_scrollbar(scrollbar)
-curve_inner=tk.Frame(canvas,bg="black"); canvas.create_window((0,0),window=curve_inner,anchor="nw")
-curve_inner.bind("<Configure>",lambda e: canvas.configure(scrollregion=canvas.bbox("all")))
+
+curve_inner = tk.Frame(canvas, bg="black")
+canvas.create_window((0,0), window=curve_inner, anchor="nw")
+
+curve_inner.bind("<Configure>", lambda e: canvas.configure(scrollregion=canvas.bbox("all")))
+
 curve_vars.clear()
 for p in load_curve():
-    row=tk.Frame(curve_inner,bg="black"); row.pack(fill="x",pady=6)
-    tk.Label(row,text=f'{p["temp"]}°C',fg="white",bg="black",width=6).pack(side="left")
-    var=tk.IntVar(value=p["pwm"])
-    tk.Label(row,textvariable=var,fg="white",bg="black",width=4).pack(side="right")
-    scale=tk.Scale(row,from_=0,to=255,orient="horizontal",variable=var,bg="black",fg="white",highlightthickness=0,length=520,sliderlength=28,width=30)
-    scale.pack(side="left",fill="x",expand=True,padx=6)
+    row = tk.Frame(curve_inner, bg="black"); row.pack(fill="x", pady=6)
+    tk.Label(row, text=f'{p["temp"]}°C', fg="white", bg="black", width=6).pack(side="left")
+    var = tk.IntVar(value=p["pwm"])
+    tk.Label(row, textvariable=var, fg="white", bg="black", width=4).pack(side="right")
+    scale = tk.Scale(row, from_=0, to=255, orient="horizontal", variable=var,
+                     bg="black", fg="white", highlightthickness=0, length=520, sliderlength=28, width=30)
+    scale.pack(side="left", fill="x", expand=True, padx=6)
     style_slider(scale)
-    curve_vars.append((p["temp"],var))
+    curve_vars.append((p["temp"], var))
 
+# -----------------------------
 # ---------- Actions ----------
-actions = tk.Frame(bottom,bg="black"); actions.pack(fill="x",pady=4)
-def save_curve():
-    data={"points":[{"temp":t,"pwm":v.get()} for t,v in curve_vars]}
-    with open(CURVE_FILE,"w") as f: json.dump(data,f,indent=2)
-    custom_msgbox(root,"Curva guardada correctamente","Guardado")
-def restore_default():
-    default=[{"temp":40,"pwm":100},{"temp":50,"pwm":130},{"temp":60,"pwm":160},{"temp":70,"pwm":180},{"temp":80,"pwm":255}]
-    with open(CURVE_FILE,"w") as f: json.dump({"points":default},f,indent=2)
-    custom_msgbox(root,"Curva restaurada por defecto","Restaurado")
+# -----------------------------
+actions = tk.Frame(bottom, bg="black"); actions.pack(fill="x", pady=4)
 
-make_futuristic_button(actions,"Guardar curva",save_curve,width=16,height=2).pack(side="left",padx=10)
-make_futuristic_button(actions,"Restaurar por defecto",restore_default,width=18,height=2).pack(side="left",padx=10)
+def save_curve():
+    """Guarda los sliders actuales en el archivo JSON"""
+    data = {"points":[{"temp":t,"pwm":v.get()} for t,v in curve_vars]}
+    with open(CURVE_FILE, "w") as f: json.dump(data, f, indent=2)
+    custom_msgbox(root, "Curva guardada correctamente", "Guardado")
+
+def restore_default():
+    """Restaura la curva por defecto y actualiza sliders"""
+    default = [{"temp":40,"pwm":100},{"temp":50,"pwm":130},{"temp":60,"pwm":160},{"temp":70,"pwm":180},{"temp":80,"pwm":255}]
+    with open(CURVE_FILE, "w") as f: json.dump({"points":default}, f, indent=2)
+    # --- Actualizamos los sliders para reflejar la curva por defecto ---
+    for t_var, (t, var) in zip(default, curve_vars):
+        var.set(t_var["pwm"])
+    custom_msgbox(root, "Curva restaurada por defecto", "Restaurado")
+
+make_futuristic_button(actions,"Guardar curva", save_curve, width=16, height=2).pack(side="left", padx=10)
+make_futuristic_button(actions,"Restaurar por defecto", restore_default, width=18, height=2).pack(side="left", padx=10)
 
 # ---------- Ventana monitor placa ----------
+monitor_win = None
+cpu_lbl = cpu_val = cpu_cvs = None
+ram_lbl = ram_val = ram_cvs = None
+temp_lbl = temp_val = temp_cvs = None
+
 def open_monitor_window():
-    global monitor_win,cpu_lbl,cpu_val,cpu_cvs,ram_lbl,ram_val,ram_cvs,temp_lbl,temp_val,temp_cvs
-    if monitor_win and monitor_win.winfo_exists(): monitor_win.lift(); return
-    monitor_win=tk.Toplevel(root)
+    global monitor_win, cpu_lbl, cpu_val, cpu_cvs, ram_lbl, ram_val, ram_cvs, temp_lbl, temp_val, temp_cvs
+    global cpu_lines, ram_lines, temp_lines
+    global disk_lbl, disk_val, disk_cvs, disk_lines
+    global disk_write_lvl, disk_write_val, disk_read_lvl, disk_read_val, disk_write_lines, disk_read_lines, disk_write_cvs, disk_read_cvs
+
+    if monitor_win and monitor_win.winfo_exists():
+        monitor_win.lift()
+        return
+
+    monitor_win = tk.Toplevel(root)
     monitor_win.title("System Monitor")
     monitor_win.configure(bg="black")
     monitor_win.overrideredirect(True)
     monitor_win.geometry(f"{DSI_WIDTH}x{DSI_HEIGHT}+{DSI_X}+{DSI_Y}")
-    monitor_win.resizable(False,False)
+    monitor_win.resizable(False, False)
+
     main_frame = tk.Frame(monitor_win, bg="black")
     main_frame.pack(fill="both", expand=True)
+
+    # --- Sección hardware ---
     section_hw = tk.Frame(main_frame, bg="black")
-    section_hw.pack(fill="both", expand=True, pady=(0, 10))
-    hw_canvas = tk.Canvas(
-    section_hw,
-    bg="black",
-    highlightthickness=0
-    )
+    section_hw.pack(fill="both", expand=True, pady=(0,10))
+
+    hw_canvas = tk.Canvas(section_hw, bg="black", highlightthickness=0)
     hw_canvas.pack(side="left", fill="both", expand=True)
-    hw_scrollbar=tk.Scrollbar(section_hw,orient="vertical",command=hw_canvas.yview,width=30) 
-    hw_scrollbar.pack(side="right",fill="y")
-    hw_canvas.configure(yscrollcommand=hw_scrollbar.set)
+    hw_scrollbar = tk.Scrollbar(section_hw, orient="vertical", command=hw_canvas.yview, width=30)
+    hw_scrollbar.pack(side="right", fill="y")
     style_scrollbar(hw_scrollbar)
+    hw_canvas.configure(yscrollcommand=hw_scrollbar.set)
+
     hw_inner = tk.Frame(hw_canvas, bg="black")
-    hw_canvas.create_window((0, 0), window=hw_inner, anchor="nw", width=DSI_WIDTH-35)
-    def _on_hw_configure(event):
-        hw_canvas.configure(scrollregion=hw_canvas.bbox("all"))
-    hw_inner.bind("<Configure>", _on_hw_configure)
-    cpu_lbl,cpu_val,cpu_cvs=make_block(hw_inner,"CPU %")
-    ram_lbl,ram_val,ram_cvs=make_block(hw_inner,"RAM %")
-    temp_lbl,temp_val,temp_cvs=make_block(hw_inner,"TEMP °C")
-    global cpu_lines, ram_lines, temp_lines
+    hw_canvas.create_window((0,0), window=hw_inner, anchor="nw", width=DSI_WIDTH-35)
+
+    hw_inner.bind("<Configure>", lambda e: hw_canvas.configure(scrollregion=hw_canvas.bbox("all")))
+
+    # --- Bloques CPU, RAM, TEMP ---
+    cpu_lbl, cpu_val, cpu_cvs = make_block(hw_inner, "CPU %")
+    ram_lbl, ram_val, ram_cvs = make_block(hw_inner, "RAM %")
+    temp_lbl, temp_val, temp_cvs = make_block(hw_inner, "TEMP °C")
+
     cpu_lines  = init_graph_lines(cpu_cvs, HISTORY, cpu_lbl.cget("fg"))
     ram_lines  = init_graph_lines(ram_cvs, HISTORY, ram_lbl.cget("fg"))
     temp_lines = init_graph_lines(temp_cvs, HISTORY, temp_lbl.cget("fg"))
-    global disk_lbl, disk_val, disk_cvs, disk_lines
+
+    # --- Bloques disco ---
     disk_lbl, disk_val, disk_cvs = make_block(hw_inner, "DISK %")
     disk_lines = init_graph_lines(disk_cvs, HISTORY, disk_lbl.cget("fg"))
-    global disk_write_lvl, disk_write_val, disk_read_lvl, disk_read_val, disk_write_lines, disk_read_lines, disk_write_cvs, disk_read_cvs
+
     disk_write_lvl, disk_write_val, disk_write_cvs = make_block(hw_inner, "DISK WRITE MB/s")
     disk_read_lvl, disk_read_val, disk_read_cvs = make_block(hw_inner, "DISK READ MB/s")
     disk_write_lines = init_graph_lines(disk_write_cvs, HISTORY, disk_write_lvl.cget("fg"))
     disk_read_lines = init_graph_lines(disk_read_cvs, HISTORY, disk_read_lvl.cget("fg"))
-    
+
+    # --- Sección inferior ---
     section_bottom = tk.Frame(main_frame, bg="black")
     section_bottom.pack(fill="x")
-    bottom_frame=tk.Frame(section_bottom,bg="black"); bottom_frame.pack(fill="x",padx=8,pady=6)
-    make_futuristic_button(
-        bottom_frame, "Red", open_net_window, width=12, height=2
-    ).pack(side="left", padx=10)
-    make_futuristic_button(bottom_frame,"Cerrar",lambda: monitor_win.destroy(),width=12,height=2).pack(side="right",padx=10)
+    bottom_frame = tk.Frame(section_bottom, bg="black"); bottom_frame.pack(fill="x", padx=8, pady=6)
 
-make_futuristic_button(actions,"Mostrar gráficas",open_monitor_window,width=14,height=2).pack(side="left",padx=10)
-make_futuristic_button(actions,"Salir",root.destroy,width=12,height=2).pack(side="right",padx=10)
+    make_futuristic_button(bottom_frame, "Red", open_net_window, width=12, height=2).pack(side="left", padx=10)
+    make_futuristic_button(bottom_frame, "Cerrar", lambda: monitor_win.destroy(), width=12, height=2).pack(side="right", padx=10)
 
-#---------- Ventana monitor de red ----------
+# ---------- Botones principales ----------
+make_futuristic_button(actions, "Mostrar gráficas", open_monitor_window, width=14, height=2).pack(side="left", padx=10)
+make_futuristic_button(actions, "Salir", root.destroy, width=12, height=2).pack(side="right", padx=10)
+
+# -----------------------------
+# ---------- Ventana monitor de red ----------
+# -----------------------------
 def open_net_window():
     global net_win
     global net_dl_lbl, net_dl_val, net_dl_cvs
     global net_ul_lbl, net_ul_val, net_ul_cvs
     global net_dl_lines, net_ul_lines
+    global ips_frame, net_iface_labels, last_used_iface, last_net_io
 
     if net_win and net_win.winfo_exists():
         net_win.lift()
@@ -531,108 +609,112 @@ def open_net_window():
 
     main_frame = tk.Frame(net_win, bg="black")
     main_frame.pack(fill="both", expand=True)
-    
+
     net_section = tk.Frame(main_frame, bg="black")
     net_section.pack(fill="both", expand=True, pady=(0, 10))
-    
+
     net_canvas = tk.Canvas(net_section, bg="black", highlightthickness=0)
     net_canvas.pack(side="left", fill="both", expand=True)
     net_scrollbar = tk.Scrollbar(net_section, orient="vertical", command=net_canvas.yview, width=30)
     net_scrollbar.pack(side="right", fill="y")
     style_scrollbar(net_scrollbar)
     net_canvas.configure(yscrollcommand=net_scrollbar.set)
-    net_inner = tk.Frame(net_canvas, bg="black")
-    net_canvas.create_window((0, 0), window=net_inner, anchor="nw", width=DSI_WIDTH-35)
-    def _on_net_configure(event):
-        net_canvas.configure(scrollregion=net_canvas.bbox("all"))
-    net_inner.bind("<Configure>", _on_net_configure)
-    
 
+    net_inner = tk.Frame(net_canvas, bg="black")
+    net_canvas.create_window((0,0), window=net_inner, anchor="nw", width=DSI_WIDTH-35)
+    net_inner.bind("<Configure>", lambda e: net_canvas.configure(scrollregion=net_canvas.bbox("all")))
+
+    # --- Bloques descarga/subida ---
     net_dl_lbl, net_dl_val, net_dl_cvs = make_block(net_inner, "DESCARGA MB/s")
     net_dl_lines = init_graph_lines(net_dl_cvs, HISTORY, "#00ffff")
-
-    # Subida
     net_ul_lbl, net_ul_val, net_ul_cvs = make_block(net_inner, "SUBIDA MB/s")
     net_ul_lines = init_graph_lines(net_ul_cvs, HISTORY, "#ffaa00")
-    # Bloque de IPs dentro de net_section
-    ips_frame = tk.Frame(net_inner, bg="black")
-    ips_frame.pack(fill="x", pady=(0, 10))  # mismo espaciado que los bloques de gráficas
 
+    # --- Bloque de IPs ---
+    ips_frame = tk.Frame(net_inner, bg="black")
+    ips_frame.pack(fill="x", pady=(0, 10))
     tk.Label(ips_frame, text="Interfaces y IPs:", fg="#14611E", bg="black",
             font=("FiraFiraMono Nerd Font", 20, "bold")).pack(anchor="w")
 
     iface_ips = get_interfaces_ips()
     for iface, ip in iface_ips.items():
-        tk.Label(ips_frame, text=f"{iface}: {ip}", fg="#00ffff", bg="black",
-                font=("FiraFiraMono Nerd Font", 18)).pack(anchor="w")
+        lbl = tk.Label(ips_frame, text=f"{iface}: {ip}", fg="#00ffff", bg="black",
+                       font=("FiraFiraMono Nerd Font", 18))
+        lbl.pack(anchor="w")
+        net_iface_labels[iface] = lbl
 
+    # --- Sección inferior ---
     bottom = tk.Frame(net_win, bg="black")
     bottom.pack(fill="x", pady=6)
+    make_futuristic_button(bottom, "Cerrar", lambda: net_win.destroy(), width=12, height=2).pack(side="right", padx=10)
 
-    make_futuristic_button(
-        bottom, "Cerrar", lambda: net_win.destroy(), width=12, height=2
-    ).pack(side="right", padx=10)
-
-
+# -----------------------------
 # ---------- Update loop ----------
+# -----------------------------
 def update():
-    global last_state, last_disk_io
+    global last_state, last_disk_io, last_net_io, last_used_iface, net_dynamic_max, net_idle_counter
+
+    # --- Cargar estado ---
     try:
-        st=load_state()
-        if st!=last_state:
-            last_state=st
+        st = load_state()
+        if st != last_state:
+            last_state = st
             mode_var.set(st.get("mode","auto"))
-            tp=st.get("target_pwm")
+            tp = st.get("target_pwm")
             if isinstance(tp,int): manual_pwm.set(tp)
     except: pass
 
-    cpu=psutil.cpu_percent(); ram=psutil.virtual_memory().percent; temp=get_cpu_temp();
+    # --- Lecturas del sistema ---
+    cpu = psutil.cpu_percent()
+    ram = psutil.virtual_memory().percent
+    temp = get_cpu_temp()
     disk_io = psutil.disk_io_counters()
-
     disk_read = (disk_io.read_bytes - last_disk_io.read_bytes)
     disk_write = (disk_io.write_bytes - last_disk_io.write_bytes)
-
     last_disk_io = disk_io
+
+    # --- Gestión PWM ---
     try:
-        st=load_state()
-        mode=st.get("mode","auto"); current_target=st.get("target_pwm")
-        if mode=="manual": desired=int(current_target) if isinstance(current_target,int) else int(manual_pwm.get())
-        elif mode=="auto": desired=compute_pwm_from_curve(temp)
+        st = load_state()
+        mode = st.get("mode","auto"); current_target = st.get("target_pwm")
+        if mode=="manual":
+            desired = int(current_target) if isinstance(current_target,int) else int(manual_pwm.get())
+        elif mode=="auto":
+            desired = compute_pwm_from_curve(temp)
         elif mode=="silent": desired=30
         elif mode=="normal": desired=128
         elif mode=="performance": desired=255
-        else: desired=compute_pwm_from_curve(temp)
-        desired=max(0,min(255,int(desired)))
-        if desired!=current_target:
+        else: desired = compute_pwm_from_curve(temp)
+        desired = max(0, min(255, int(desired)))
+        if desired != current_target:
             write_state({"mode":mode,"target_pwm":desired})
     except: pass
 
+    # --- Actualizar ventana monitor si existe ---
     if monitor_win and monitor_win.winfo_exists():
         cpu_hist.append(cpu); ram_hist.append(ram); temp_hist.append(temp)
-        cpu_c=level_color(cpu,CPU_WARN,CPU_CRIT)
-        ram_c=level_color(ram,RAM_WARN,RAM_CRIT)
-        tmp_c=level_color(temp,TEMP_WARN,TEMP_CRIT)
+        cpu_c = level_color(cpu, CPU_WARN, CPU_CRIT)
+        ram_c = level_color(ram, RAM_WARN, RAM_CRIT)
+        tmp_c = level_color(temp, TEMP_WARN, TEMP_CRIT)
         recolor_lines(cpu_cvs, cpu_lines, cpu_c)
         recolor_lines(ram_cvs, ram_lines, ram_c)
         recolor_lines(temp_cvs, temp_lines, tmp_c)
         update_graph_lines(cpu_cvs, cpu_lines, cpu_hist, 100)
         update_graph_lines(ram_cvs, ram_lines, ram_hist, 100)
         update_graph_lines(temp_cvs, temp_lines, temp_hist, 85)
-        cpu_lbl.config(fg=cpu_c); cpu_val.config(text=f"{cpu:4.0f} %",fg=cpu_c)
-        ram_lbl.config(fg=ram_c); ram_val.config(text=f"{ram:4.0f} %",fg=ram_c)
-        temp_lbl.config(fg=tmp_c); temp_val.config(text=f"{temp:4.1f} °C",fg=tmp_c)
+        cpu_lbl.config(fg=cpu_c); cpu_val.config(text=f"{cpu:4.0f} %", fg=cpu_c)
+        ram_lbl.config(fg=ram_c); ram_val.config(text=f"{ram:4.0f} %", fg=ram_c)
+        temp_lbl.config(fg=tmp_c); temp_val.config(text=f"{temp:4.1f} °C", fg=tmp_c)
+
+        # --- Disco ---
         disk = psutil.disk_usage('/').percent
         disk_hist.append(disk)
         disk_c = level_color(disk, 60, 80)
         recolor_lines(disk_cvs, disk_lines, disk_c)
-        update_graph_lines(
-            disk_cvs,
-            disk_lines,
-            disk_hist,
-            100
-        )
+        update_graph_lines(disk_cvs, disk_lines, disk_hist, 100)
         disk_lbl.config(fg=disk_c)
         disk_val.config(text=f"{disk:.0f} %", fg=disk_c)
+
         disk_write_mb = disk_write / 1024 / 1024
         disk_read_mb = disk_read / 1024 / 1024
         disk_write_hist.append(disk_write_mb)
@@ -641,92 +723,40 @@ def update():
         read_c = level_color(disk_read_mb, 10, 50)
         recolor_lines(disk_write_cvs, disk_write_lines, write_c)
         recolor_lines(disk_read_cvs, disk_read_lines, read_c)
-        update_graph_lines(
-            disk_write_cvs,
-            disk_write_lines,
-            disk_write_hist,
-            100
-        )
-        update_graph_lines( 
-            disk_read_cvs,
-            disk_read_lines,
-            disk_read_hist,
-            100
-        )
+        update_graph_lines(disk_write_cvs, disk_write_lines, disk_write_hist, 50)
+        update_graph_lines(disk_read_cvs, disk_read_lines, disk_read_hist, 50)
         disk_write_lvl.config(fg=write_c)
-        disk_write_val.config(text=f"{disk_write_mb:.2f} MB/s", fg=write_c)
         disk_read_lvl.config(fg=read_c)
-        disk_read_val.config(text=f"{disk_read_mb:.2f} MB/s", fg=read_c)
-       
-        
+        disk_write_val.config(text=f"{disk_write_mb:.1f} MB/s", fg=write_c)
+        disk_read_val.config(text=f"{disk_read_mb:.1f} MB/s", fg=read_c)
 
+    # --- Red ---
     if net_win and net_win.winfo_exists():
-        global last_net_io, last_used_iface
+        iface, stats = get_net_io(NET_INTERFACE)
+        dl, ul = safe_net_speed(stats, last_net_io)
+        last_net_io = stats
+        net_download_hist.append(dl)
+        net_upload_hist.append(ul)
+        net_dynamic_max = adaptive_scale(net_dynamic_max, list(net_download_hist)+list(net_upload_hist))
+        recolor_lines(net_dl_cvs, net_dl_lines, net_color(dl))
+        recolor_lines(net_ul_cvs, net_ul_lines, net_color(ul))
+        update_graph_lines(net_dl_cvs, net_dl_lines, net_download_hist, net_dynamic_max,)
+        update_graph_lines(net_ul_cvs, net_ul_lines, net_upload_hist, net_dynamic_max)
+        net_dl_lbl.config(fg=net_color(dl))
+        net_ul_lbl.config(fg=net_color(ul))
+        net_dl_val.config(text=f"{dl:.2f} MB/s | Escala: {net_dynamic_max:.2f}", fg=net_color(dl))
+        net_ul_val.config(text=f"{ul:.2f} MB/s | Escala: {net_dynamic_max:.2f}", fg=net_color(ul))
 
-        used_iface, net_io = get_net_io(NET_INTERFACE)
-
-        # --- Detectar cambio de interfaz ---
-        if used_iface != last_used_iface:
-            last_used_iface = used_iface
-            last_net_io = net_io
-            download = 0.0
-            upload = 0.0
-        else:
-            download, upload = safe_net_speed(net_io, last_net_io)
-            last_net_io = net_io
-
-
-        net_download_hist.append(download)
-        net_upload_hist.append(upload)
-        
-        global net_dynamic_max
-
-        combined = list(net_download_hist) + list(net_upload_hist)
-        net_dynamic_max = adaptive_scale(net_dynamic_max, combined)
-
-
-        smooth_dl = smooth(list(net_download_hist), 6)
-        smooth_ul = smooth(list(net_upload_hist), 6)
-
-
-        update_graph_lines(
-            net_dl_cvs,
-            net_dl_lines,
-            smooth_dl,
-            net_dynamic_max
-        )
-
-        update_graph_lines(
-            net_ul_cvs,
-            net_ul_lines,
-            smooth_ul,
-            net_dynamic_max
-        )
-
-
-        dl_c = net_color(download)
-        ul_c = net_color(upload)
-
-        recolor_lines(net_dl_cvs, net_dl_lines, dl_c)
-        recolor_lines(net_ul_cvs, net_ul_lines, ul_c)
-
-        net_dl_lbl.config(fg=dl_c, text=f"DESCARGA MB/s ({used_iface})")
-        net_dl_val.config(fg=dl_c, text=f"{download:5.2f} MB/s | Escala: {net_dynamic_max:.1f} MB/s")
-        net_ul_lbl.config(fg=ul_c, text=f"SUBIDA MB/s ({used_iface})")
-        net_ul_val.config(fg=ul_c, text=f"{upload:5.2f} MB/s | Escala: {net_dynamic_max:.1f} MB/s")
+        # actualizar IPs
         iface_ips = get_interfaces_ips()
-        for iface, ip in iface_ips.items():
-            if iface in net_iface_labels:
-                net_iface_labels[iface].config(text=f"{iface}: {ip}")
-            else:
-                lbl = tk.Label(ips_frame, text=f"{iface}: {ip}", fg="#00ffff", bg="black",
-                            font=("FiraFiraMono Nerd Font", 14))
-                lbl.pack(anchor="w")
-                net_iface_labels[iface] = lbl
+        for iface, lbl in net_iface_labels.items():
+            ip = iface_ips.get(iface,"-")
+            lbl.config(text=f"{iface}: {ip}")
 
+    root.after(UPDATE_MS, update)
 
-    root.after(UPDATE_MS,update)
-
+# -----------------------------
+# ---------- Inicio ----------
+# -----------------------------
 update()
 root.mainloop()
-
