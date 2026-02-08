@@ -6,6 +6,10 @@ import json
 import os
 import socket
 import logging
+import threading
+import re
+from functools import partial
+
 
 # -----------------------------
 # ---------- Archivos ----------
@@ -333,6 +337,182 @@ def get_interfaces_ips():
                 result[iface] = addr.address
     return result
 
+def run_speedtest():
+    global speedtest_running
+
+    speedtest_running = True
+
+    speedtest_result["status"] = "running"
+    speedtest_result["ping"] = None
+    speedtest_result["download"] = None
+    speedtest_result["upload"] = None
+
+    try:
+        proc = subprocess.run(
+            ["speedtest-cli", "--simple"],
+            capture_output=True,
+            text=True,
+            timeout=60
+        )
+
+        out = proc.stdout
+
+        ping = re.search(r"Ping:\s+([\d.]+)", out)
+        down = re.search(r"Download:\s+([\d.]+)", out)
+        up   = re.search(r"Upload:\s+([\d.]+)", out)
+
+        speedtest_result["ping"] = float(ping.group(1)) if ping else None
+        speedtest_result["download"] = float(down.group(1))/8 if down else None
+        speedtest_result["upload"] = float(up.group(1))/8 if up else None
+
+        speedtest_result["status"] = "done"
+
+    except subprocess.TimeoutExpired:
+        speedtest_result["status"] = "timeout"
+    except Exception:
+        speedtest_result["status"] = "error"
+
+    speedtest_running = False
+
+def start_speedtest():
+    if speedtest_running:
+        return
+    t = threading.Thread(target=run_speedtest, daemon=True)
+    t.start()
+
+def list_all_usb_devices():
+    """
+    Retorna dos listas de dispositivos USB:
+    1. almacenamiento: discos/particiones USB con mountpoint
+    2. otros: cualquier otro USB (teclados, ratones, cámaras, hubs, etc.)
+    Cada dispositivo es un dict con keys: 'name', 'type', 'mount', 'dev', 'size'
+    """
+    storage_devices = []
+    other_devices = []
+
+    # --- Discos USB ---
+    try:
+        out = subprocess.check_output(
+            ["lsblk", "-o", "NAME,MODEL,TRAN,MOUNTPOINT,SIZE,TYPE", "-J"], text=True
+        )
+        blk = json.loads(out)
+        for block in blk.get("blockdevices", []):
+            if block.get("tran") == "usb":
+                storage_devices.append({
+                    "name": block.get("model", "USB Disk"),
+                    "type": block.get("type", "disk"),
+                    "mount": block.get("mountpoint"),
+                    "dev": "/dev/" + block.get("name"),
+                    "size": block.get("size")
+                })
+            for child in block.get("children", []):
+                if child.get("tran") == "usb":
+                    storage_devices.append({
+                        "name": child.get("model", "USB Disk"),
+                        "type": child.get("type", "part"),
+                        "mount": child.get("mountpoint"),
+                        "dev": "/dev/" + child.get("name"),
+                        "size": child.get("size")
+                    })
+    except Exception:
+        pass
+
+    # --- Otros dispositivos USB ---
+    try:
+        out = subprocess.check_output(["lsusb"], text=True)
+        for line in out.strip().split("\n"):
+            if line:
+                other_devices.append({"name": line, "type": "usb", "mount": None, "dev": None, "size": None})
+    except Exception:
+        other_devices.append({"name": "Error listando USBs", "type": "error", "mount": None, "dev": None, "size": None})
+
+    return storage_devices, other_devices
+
+last_storage_devices = set()  # global
+
+def refresh_usb_devices():
+    """
+    Refresca los dispositivos USB en la ventana actual.
+    """
+    global usb_inner_frame, usb_devices_labels, usb_devices_buttons
+
+    if not usb_win or not usb_win.winfo_exists():
+        return
+
+    storage, others = list_all_usb_devices()
+
+    # Limpiar widgets antiguos (excepto botón refrescar)
+    for key, lbl in list(usb_devices_labels.items()):
+        if key != "refresh_btn": lbl.destroy()
+        usb_devices_labels.pop(key, None)
+    for btn in usb_devices_buttons.values():
+        btn.destroy()
+    usb_devices_buttons.clear()
+
+    # --- Almacenamiento USB ---
+    if storage:
+        lbl_title = tk.Label(usb_inner_frame, text="Almacenamiento USB:", fg="#14611E", bg="black",
+                             font=("FiraFiraMono Nerd Font", 20, "bold"))
+        lbl_title.pack(anchor="w", pady=(10, 5))
+        usb_devices_labels["storage_title"] = lbl_title
+
+        for idx, dev in enumerate(storage):
+            info_text = f"{dev['name']} ({dev['type']})"
+            if dev['size']: info_text += f" - {dev['size']}"
+            if dev['mount']: info_text += f" | Montado en: {dev['mount']}"
+
+            lbl = tk.Label(usb_inner_frame, text=info_text, fg="#00ffff", bg="black",
+                        font=("FiraFiraMono Nerd Font", 18))
+            lbl.pack(anchor="w", pady=2)
+            usb_devices_labels[f"storage_{idx}"] = lbl
+
+            # Botón expulsar solo si está montado
+            btn = tk.Button(
+                usb_inner_frame,
+                text="Expulsar",
+                fg="#00ffff", bg="#111111",
+                command=lambda d=dev: eject_usb_device_with_popup(d),
+                font=("FiraFiraMono Nerd Font", 14, "bold"),
+                width=12, height=1
+            )
+            btn.pack(anchor="w", padx=20, pady=(0,4))
+            usb_devices_buttons[f"storage_{idx}"] = btn
+    # --- Otros dispositivos USB ---
+    if others:
+        lbl_title = tk.Label(usb_inner_frame, text="Otros dispositivos USB:", fg="#14611E", bg="black",
+                             font=("FiraFiraMono Nerd Font", 20, "bold"))
+        lbl_title.pack(anchor="w", pady=(10, 5))
+        usb_devices_labels["others_title"] = lbl_title
+
+        for idx, dev in enumerate(others):
+            lbl = tk.Label(usb_inner_frame, text=dev['name'], fg="#00ffff", bg="black",
+                           font=("FiraFiraMono Nerd Font", 16))
+            lbl.pack(anchor="w", pady=1)
+            usb_devices_labels[f"other_{idx}"] = lbl
+
+
+def eject_usb_device_with_popup(dev):
+    try:
+        # Desmontar todas las particiones del disco
+        if dev['type'] == 'disk':
+            out = subprocess.check_output(
+                ["lsblk", "-ln", "-o", "NAME,MOUNTPOINT", dev['dev']], text=True
+            )
+            for line in out.strip().split("\n"):
+                parts = line.split()
+                if len(parts) == 2 and parts[1]:  # tiene mountpoint
+                    part_dev = "/dev/" + parts[0]
+                    subprocess.run(["udisksctl", "unmount", "-b", part_dev], check=True)
+        elif dev['mount']:  # si es solo una partición
+            subprocess.run(["udisksctl", "unmount", "-b", dev['dev']], check=True)
+
+        # Expulsar el disco
+        subprocess.run(["udisksctl", "power-off", "-b", dev['dev']], check=True)
+        custom_msgbox(usb_win, f"{dev['name']} expulsado correctamente")
+    except subprocess.CalledProcessError as e:
+        custom_msgbox(usb_win, f"No se pudo expulsar {dev['name']}.\n{e}", title="Error")
+
+
 # -----------------------------
 # ---------- Variables globales ----------
 # -----------------------------
@@ -387,8 +567,23 @@ net_dl_lines = []
 net_ul_lines = []
 net_iface_labels = {}  # diccionario: iface -> Label widget
 ips_frame = None       # frame donde estarán las IPs
-
-
+speedtest_running = False
+speedtest_result = {
+    "ping": None,
+    "download": None,
+    "upload": None,
+    "status": "idle"
+}
+net_speed_test_lbl = None
+net_speed_test_val = None
+# ---------- Ventana monitor USB ----------
+usb_win = None
+usb_inner_frame = None  # Frame interno donde estarán los dispositivos
+usb_scroll_canvas = None
+usb_scroll_lines = []   # opcional, si quieres animar algún gráfico futuro
+usb_devices_labels = {} # Diccionario: id -> Label widget
+usb_devices_buttons = {}     # idx -> botón de expulsar
+usb_devices_info = []        # lista de dicts con info de cada USB
 
 # -----------------------------
 # ---------- Posicionamiento DSI para root ----------
@@ -593,6 +788,7 @@ def open_monitor_window():
     bottom_frame = tk.Frame(section_bottom, bg="black"); bottom_frame.pack(fill="x", padx=8, pady=6)
 
     make_futuristic_button(bottom_frame, "Red", open_net_window, width=12, height=2).pack(side="left", padx=10)
+    make_futuristic_button(bottom_frame, "USB", open_usb_window, width=12, height=2).pack(side="left", padx=10)
     make_futuristic_button(bottom_frame, "Cerrar", lambda: monitor_win.destroy(), width=12, height=2).pack(side="right", padx=10)
 
 # ---------- Botones principales ----------
@@ -608,7 +804,7 @@ def open_net_window():
     global net_ul_lbl, net_ul_val, net_ul_cvs
     global net_dl_lines, net_ul_lines
     global ips_frame, net_iface_labels, last_used_iface, last_net_io
-
+    global net_speed_test_lbl, net_speed_test_val
     if net_win and net_win.winfo_exists():
         net_win.lift()
         return
@@ -642,7 +838,24 @@ def open_net_window():
     net_dl_lines = init_graph_lines(net_dl_cvs, HISTORY, "#00ffff")
     net_ul_lbl, net_ul_val, net_ul_cvs = make_block(net_inner, "SUBIDA MB/s")
     net_ul_lines = init_graph_lines(net_ul_cvs, HISTORY, "#ffaa00")
+    # --- Bloque speedtest ---
+    net_speed_test_lbl = tk.Label(
+        net_inner,
+        text="TEST DE VELOCIDAD",
+        fg="#14611E",
+        bg="black",
+        font=("FiraFiraMono Nerd Font", 20, "bold")
+    )
+    net_speed_test_lbl.pack(anchor="w", pady=(10, 0))
 
+    net_speed_test_val = tk.Label(
+        net_inner,
+        text="Esperando test...",
+        fg="#00ffff",
+        bg="black",
+        font=("FiraFiraMono Nerd Font", 18)
+    )
+    net_speed_test_val.pack(anchor="w", pady=(0, 10))
     # --- Bloque de IPs ---
     ips_frame = tk.Frame(net_inner, bg="black")
     ips_frame.pack(fill="x", pady=(0, 10))
@@ -657,9 +870,70 @@ def open_net_window():
         net_iface_labels[iface] = lbl
 
     # --- Sección inferior ---
+
     bottom = tk.Frame(net_win, bg="black")
     bottom.pack(fill="x", pady=6)
+    make_futuristic_button(
+        bottom,
+        "Test velocidad",
+        start_speedtest,
+        width=16,
+        height=2
+    ).pack(side="left", padx=10)
+
     make_futuristic_button(bottom, "Cerrar", lambda: net_win.destroy(), width=12, height=2).pack(side="right", padx=10)
+
+def open_usb_window():
+    """
+    Abre la ventana de dispositivos USB.
+    """
+    global usb_win, usb_inner_frame, usb_scroll_canvas
+    global usb_devices_labels, usb_devices_buttons
+
+    if usb_win and usb_win.winfo_exists():
+        usb_win.lift()
+        return
+
+    usb_win = tk.Toplevel(root)
+    usb_win.title("Dispositivos USB")
+    usb_win.configure(bg="black")
+    usb_win.overrideredirect(True)
+    usb_win.geometry(f"{DSI_WIDTH}x{DSI_HEIGHT}+{DSI_X}+{DSI_Y}")
+    usb_win.resizable(False, False)
+
+    main_frame = tk.Frame(usb_win, bg="black")
+    main_frame.pack(fill="both", expand=True)
+    usb_section = tk.Frame(main_frame, bg="black")
+    usb_section.pack(fill="both", expand=True, pady=(0, 10))
+    # Scrollable frame
+    usb_scroll_canvas = tk.Canvas(usb_section, bg="black", highlightthickness=0)
+    usb_scroll_canvas.pack(side="left", fill="both", expand=True)
+    usb_scrollbar = tk.Scrollbar(usb_section, orient="vertical", command=usb_scroll_canvas.yview, width=30)
+    usb_scrollbar.pack(side="right", fill="y")
+    style_scrollbar(usb_scrollbar)
+    usb_scroll_canvas.configure(yscrollcommand=usb_scrollbar.set)
+
+    usb_inner_frame = tk.Frame(usb_scroll_canvas, bg="black")
+    usb_scroll_canvas.create_window((0,0), window=usb_inner_frame, anchor="nw", width=DSI_WIDTH-35)
+    usb_inner_frame.bind("<Configure>", lambda e: usb_scroll_canvas.configure(scrollregion=usb_scroll_canvas.bbox("all")))
+
+
+    # Limpiar contenedores
+    usb_devices_labels.clear()
+    usb_devices_buttons.clear()
+
+    # Botón cerrar siempre abajo
+    bottom_frame = tk.Frame(main_frame, bg="black")
+    bottom_frame.pack(fill="x", pady=6)
+    make_futuristic_button(bottom_frame, "Cerrar", usb_win.destroy, width=12, height=2).pack(side="right", padx=10)
+    refresh_btn = make_futuristic_button(
+        bottom_frame, "Refrescar USB", refresh_usb_devices, width=16, height=2
+    )
+    refresh_btn.pack(anchor="w", pady=(10, 10))
+
+    # Carga inicial
+    refresh_usb_devices()
+
 
 # -----------------------------
 # ---------- Update loop ----------
@@ -769,8 +1043,45 @@ def update():
         net_ul_lbl.config(text=f"SUBIDA MB/s ({iface})", fg=net_color(ul))
         net_dl_val.config(text=f"{dl:.2f} MB/s | Escala: {net_dynamic_max:.2f}", fg=net_color(dl))
         net_ul_val.config(text=f"{ul:.2f} MB/s | Escala: {net_dynamic_max:.2f}", fg=net_color(ul))
+        if (
+            net_win and net_win.winfo_exists()
+            and net_speed_test_val is not None
+        ):
+            st = speedtest_result["status"]
 
+            if st == "idle":
+                net_speed_test_val.config(
+                    text="Esperando test...",
+                    fg="#00ffff"
+                )
 
+            elif st == "running":
+                net_speed_test_val.config(
+                    text="Ejecutando test...",
+                    fg="#ffaa00"
+                )
+
+            elif st == "done":
+                net_speed_test_val.config(
+                    text=(
+                        f"Ping: {speedtest_result['ping']} ms\n"
+                        f"↓ {speedtest_result['download']} MB/s\n"
+                        f"↑ {speedtest_result['upload']} MB/s"
+                    ),
+                    fg="#00ffff"
+                )
+
+            elif st == "timeout":
+                net_speed_test_val.config(
+                    text="Timeout en el test",
+                    fg="#ff3333"
+                )
+
+            elif st == "error":
+                net_speed_test_val.config(
+                    text="Error ejecutando test",
+                    fg="#ff3333"
+                )
 
 
     root.after(UPDATE_MS, update)
