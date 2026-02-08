@@ -83,11 +83,59 @@ def custom_msgbox(parent, text, title="Info"):
     popup = tk.Toplevel(parent)
     popup.overrideredirect(True)
     popup.configure(bg="#111111")
-    popup.geometry("300x150+{}+{}".format(parent.winfo_x()+250, parent.winfo_y()+180))
-    tk.Label(popup, text=title, fg="#00ffff", bg="#111111", font=("FiraFiraMono Nerd Font",16,"bold")).pack(pady=(10,0))
-    tk.Label(popup, text=text, fg="white", bg="#111111", font=("FiraFiraMono Nerd Font",14)).pack(pady=(10,10))
-    tk.Button(popup, text="OK", fg="#00ffff", bg="#111111", command=popup.destroy, width=10,height=10).pack(pady=(0,10))
-    popup.lift(); popup.focus_force(); popup.grab_set()
+
+    # --- Contenedor ---
+    frame = tk.Frame(popup, bg="#111111", padx=20, pady=20)
+    frame.pack(fill="both", expand=True)
+
+    title_lbl = tk.Label(
+        frame, text=title,
+        fg="#00ffff", bg="#111111",
+        font=("FiraFiraMono Nerd Font", 16, "bold")
+    )
+    title_lbl.pack(anchor="center", pady=(0, 10))
+
+    text_lbl = tk.Label(
+        frame, text=text,
+        fg="white", bg="#111111",
+        font=("FiraFiraMono Nerd Font", 14),
+        justify="left",
+        wraplength=800   # límite lógico, no tamaño final
+    )
+    text_lbl.pack(anchor="center", pady=(0, 15))
+
+    btn = tk.Button(
+        frame, text="OK",
+        fg="#00ffff", bg="#111111",
+        command=popup.destroy,
+        width=10, height=1
+    )
+    btn.pack()
+
+    # --- Forzar cálculo de tamaño ---
+    popup.update_idletasks()
+
+    # --- Tamaño requerido ---
+    w = popup.winfo_reqwidth()
+    h = popup.winfo_reqheight()
+
+    # --- Tamaño máximo de pantalla ---
+    max_w = parent.winfo_screenwidth() - 40
+    max_h = parent.winfo_screenheight() - 40
+
+    w = min(w, max_w)
+    h = min(h, max_h)
+
+    # --- Centrar sobre la ventana padre ---
+    x = parent.winfo_x() + (parent.winfo_width() // 2) - (w // 2)
+    y = parent.winfo_y() + (parent.winfo_height() // 2) - (h // 2)
+
+    popup.geometry(f"{w}x{h}+{x}+{y}")
+
+    popup.lift()
+    popup.focus_force()
+    popup.grab_set()
+
 
 # -----------------------------
 # ---------- Utils ----------
@@ -398,28 +446,36 @@ def list_all_usb_devices():
         blk = json.loads(out)
         for block in blk.get("blockdevices", []):
             if block.get("tran") == "usb":
-                storage_devices.append({
+                # Guardar disco padre
+                dev = {
                     "name": block.get("model", "USB Disk"),
                     "type": block.get("type", "disk"),
                     "mount": block.get("mountpoint"),
                     "dev": "/dev/" + block.get("name"),
-                    "size": block.get("size")
-                })
-            for child in block.get("children", []):
-                if child.get("tran") == "usb":
-                    storage_devices.append({
-                        "name": child.get("model", "USB Disk"),
-                        "type": child.get("type", "part"),
+                    "size": block.get("size"),
+                    "children": []
+                }
+
+                # Guardar particiones como hijos
+                for child in block.get("children", []):
+                    child_dev = {
+                        "name": child.get("model") or child.get("name"),
+                        "type": child.get("type"),
                         "mount": child.get("mountpoint"),
                         "dev": "/dev/" + child.get("name"),
                         "size": child.get("size")
-                    })
+                    }
+                    dev["children"].append(child_dev)
+
+                storage_devices.append(dev)
+
     except Exception:
         pass
 
     # --- Otros dispositivos USB ---
     try:
         out = subprocess.check_output(["lsusb"], text=True)
+        
         for line in out.strip().split("\n"):
             if line:
                 other_devices.append({"name": line, "type": "usb", "mount": None, "dev": None, "size": None})
@@ -427,6 +483,28 @@ def list_all_usb_devices():
         other_devices.append({"name": "Error listando USBs", "type": "error", "mount": None, "dev": None, "size": None})
 
     return storage_devices, other_devices
+
+def parse_lsusb_line(line):
+    """
+    Convierte una línea de lsusb en algo más legible:
+    'Bus 004 Device 002: ID 0b05:17eb ASUSTek Computer, Inc. USB-AC55 ...'
+    → 'Bus 004 - ASUSTek Computer, Inc.: USB-AC55 ...'
+    """
+    parts = line.split()
+    try:
+        # Extraer número de bus
+        bus_index = parts.index("Bus") + 1
+        bus = parts[bus_index]
+
+        # Buscar el primer elemento después del ID XXXX:YYYY
+        id_index = parts.index("ID") + 2
+        manufacturer = parts[id_index]
+        model = " ".join(parts[id_index+1:])
+
+        return f"Bus {bus} - {manufacturer}: {model}"
+    except Exception:
+        return line  # fallback si no se puede parsear
+
 
 last_storage_devices = set()  # global
 
@@ -452,21 +530,19 @@ def refresh_usb_devices():
     # --- Almacenamiento USB ---
     if storage:
         lbl_title = tk.Label(usb_inner_frame, text="Almacenamiento USB:", fg="#14611E", bg="black",
-                             font=("FiraFiraMono Nerd Font", 20, "bold"))
+                            font=("FiraFiraMono Nerd Font", 20, "bold"))
         lbl_title.pack(anchor="w", pady=(10, 5))
         usb_devices_labels["storage_title"] = lbl_title
-
         for idx, dev in enumerate(storage):
-            info_text = f"{dev['name']} ({dev['type']})"
-            if dev['size']: info_text += f" - {dev['size']}"
-            if dev['mount']: info_text += f" | Montado en: {dev['mount']}"
-
+            name = dev.get("model") or dev.get("name")
+            size = dev.get("size")
+            info_text = f"{name} ({dev['type']}) - {size}"
             lbl = tk.Label(usb_inner_frame, text=info_text, fg="#00ffff", bg="black",
-                        font=("FiraFiraMono Nerd Font", 18))
+                        font=("FiraFiraMono Nerd Font", 18), wraplength=DSI_WIDTH-60)
             lbl.pack(anchor="w", pady=2)
             usb_devices_labels[f"storage_{idx}"] = lbl
 
-            # Botón expulsar solo si está montado
+            # --- Botón de expulsar para el disco padre siempre ---
             btn = tk.Button(
                 usb_inner_frame,
                 text="Expulsar",
@@ -477,6 +553,30 @@ def refresh_usb_devices():
             )
             btn.pack(anchor="w", padx=20, pady=(0,4))
             usb_devices_buttons[f"storage_{idx}"] = btn
+
+                # --- Mostrar particiones montadas ---
+            children = dev.get("children") or []
+            for c_idx, part in enumerate(children):
+                mount = part.get("mount")
+                name = part.get("name")
+                part_text = f"Partición: {name}"
+                if mount:
+                    part_text += f" | Montado en: {mount}"  # <-- aquí añadimos el punto de montaje
+
+                # Creamos la etiqueta
+                part_lbl = tk.Label(
+                    usb_inner_frame,
+                    text=part_text,
+                    fg="#00ffff",
+                    bg="black",
+                    font=("FiraFiraMono Nerd Font", 16),
+                    wraplength=DSI_WIDTH-60
+                )
+                part_lbl.pack(anchor="w", padx=40, pady=1)
+                usb_devices_labels[f"storage_{idx}_part_{c_idx}"] = part_lbl
+
+
+
     # --- Otros dispositivos USB ---
     if others:
         lbl_title = tk.Label(usb_inner_frame, text="Otros dispositivos USB:", fg="#14611E", bg="black",
@@ -485,8 +585,9 @@ def refresh_usb_devices():
         usb_devices_labels["others_title"] = lbl_title
 
         for idx, dev in enumerate(others):
-            lbl = tk.Label(usb_inner_frame, text=dev['name'], fg="#00ffff", bg="black",
-                           font=("FiraFiraMono Nerd Font", 16))
+            text = parse_lsusb_line(dev['name'])
+            lbl = tk.Label(usb_inner_frame, text=text, fg="#00ffff", bg="black",
+                        font=("FiraFiraMono Nerd Font", 16), anchor="w", justify="left", wraplength=DSI_WIDTH-60)
             lbl.pack(anchor="w", pady=1)
             usb_devices_labels[f"other_{idx}"] = lbl
 
