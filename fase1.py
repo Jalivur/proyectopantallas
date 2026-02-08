@@ -4,13 +4,13 @@ import subprocess
 from PIL import Image, ImageDraw, ImageFont
 import os
 import sys
-sys.path.append("/home/jalivur/Documents/proyectyopantallas")
+sys.path.append("/home/jalivur/Documents/proyectopantallas")
 from Code.expansion import Expansion
 from Code.oled import OLED
 import json
 import os
 
-STATE_FILE = "/home/jalivur/Documents/proyectyopantallas/fan_state.json"
+STATE_FILE = "/home/jalivur/Documents/proyectopantallas/fan_state.json"
 
 def read_fan_state():
     if not os.path.exists(STATE_FILE):

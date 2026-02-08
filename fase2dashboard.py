@@ -14,8 +14,8 @@ from functools import partial
 # -----------------------------
 # ---------- Archivos ----------
 # -----------------------------
-STATE_FILE = "/home/jalivur/Documents/proyectyopantallas/fan_state.json"
-CURVE_FILE = "/home/jalivur/Documents/proyectyopantallas/fan_curve.json"
+STATE_FILE = "/home/jalivur/Documents/proyectopantallas/fan_state.json"
+CURVE_FILE = "/home/jalivur/Documents/proyectopantallas/fan_curve.json"
 
 # -----------------------------
 # ---------- DSI display config ----------
