@@ -1,4 +1,5 @@
 import tkinter as tk
+import customtkinter as ctk
 import psutil
 import subprocess
 from collections import deque
@@ -47,6 +48,24 @@ NET_MIN_SCALE = 0.5
 NET_MAX_SCALE = 200.0   # límite de seguridad
 NET_IDLE_THRESHOLD = 0.2
 NET_IDLE_RESET_TIME = 15   # segundos
+LAUNCHERS = [
+    {
+        "label": "Montar NAS",
+        "script": "/home/jalivur/Documents/montarnas.sh"
+    },
+    {
+        "label": "Desmontar NAS",
+        "script": "/home/jalivur/Documents/desmontarnas.sh"
+    },
+    {
+        "label": "Update System",
+        "script": "/home/jalivur/Documents/update.sh"
+    },
+    {
+        "label": "Shutdown",
+        "script": "/home/jalivur/Documents/apagado.sh"
+    }
+]
 
 # -----------------------------
 # ---------- Helper style ----------
@@ -59,14 +78,20 @@ def style_radiobutton(rb, fg="#00ffff", bg="#111111", hover_fg="#1ae313"):
     rb.bind("<Enter>", on_enter)
     rb.bind("<Leave>", on_leave)
 
-def make_futuristic_button(parent, text, command=None, width=12, height=2):
-    btn = tk.Button(parent, text=text, command=command,
-                    fg="#00ffff", bg="#111111",
-                    activebackground="#222222", activeforeground="#00ffff",
-                    borderwidth=2, relief="ridge", width=width, height=height,
-                    font=("FiraFiraMono Nerd Font", 14, "bold"))
-    def on_enter(e): btn.config(fg="#00ffff", bg="#222222")
-    def on_leave(e): btn.config(fg="#00ffff", bg="#111111")
+def make_futuristic_button(parent, text, command=None, width=None, height=None, font_size=None):
+    if width is None:
+        width = 30
+    if height is None:
+        height = 10
+    if font_size is None:
+        font_size = 20
+    btn = ctk.CTkButton(parent, text=text, command=command,
+                    fg_color="#111111", hover_color="#222222",
+                    border_width=3, border_color="#00ffff",
+                    width=width*8, height=height*8,
+                    font=("FiraFiraMono Nerd Font", font_size, "bold"), corner_radius=10)
+    def on_enter(e): btn.configure(fg_color="#222222")
+    def on_leave(e): btn.configure(fg_color="#111111")
     btn.bind("<Enter>", on_enter)
     btn.bind("<Leave>", on_leave)
     return btn
@@ -104,11 +129,10 @@ def custom_msgbox(parent, text, title="Info"):
     )
     text_lbl.pack(anchor="center", pady=(0, 15))
 
-    btn = tk.Button(
+    btn = make_futuristic_button(
         frame, text="OK",
-        fg="#00ffff", bg="#111111",
         command=popup.destroy,
-        width=10, height=1
+        width=15, height=6, font_size=16
     )
     btn.pack()
 
@@ -542,14 +566,13 @@ def refresh_usb_devices():
             lbl.pack(anchor="w", pady=2)
             usb_devices_labels[f"storage_{idx}"] = lbl
 
-            # --- Botón de expulsar para el disco padre siempre ---
-            btn = tk.Button(
+        # --- Botón de expulsar para el disco padre siempre ---
+            btn = make_futuristic_button(
                 usb_inner_frame,
                 text="Expulsar",
-                fg="#00ffff", bg="#111111",
                 command=lambda d=dev: eject_usb_device_with_popup(d),
-                font=("FiraFiraMono Nerd Font", 14, "bold"),
-                width=12, height=1
+                width=20, 
+                height=4
             )
             btn.pack(anchor="w", padx=20, pady=(0,4))
             usb_devices_buttons[f"storage_{idx}"] = btn
@@ -562,6 +585,8 @@ def refresh_usb_devices():
                 part_text = f"Partición: {name}"
                 if mount:
                     part_text += f" | Montado en: {mount}"  # <-- aquí añadimos el punto de montaje
+                    
+            
 
                 # Creamos la etiqueta
                 part_lbl = tk.Label(
@@ -591,27 +616,34 @@ def refresh_usb_devices():
             lbl.pack(anchor="w", pady=1)
             usb_devices_labels[f"other_{idx}"] = lbl
 
-
 def eject_usb_device_with_popup(dev):
     try:
-        # Desmontar todas las particiones del disco
-        if dev['type'] == 'disk':
-            out = subprocess.check_output(
-                ["lsblk", "-ln", "-o", "NAME,MOUNTPOINT", dev['dev']], text=True
-            )
-            for line in out.strip().split("\n"):
-                parts = line.split()
-                if len(parts) == 2 and parts[1]:  # tiene mountpoint
-                    part_dev = "/dev/" + parts[0]
-                    subprocess.run(["udisksctl", "unmount", "-b", part_dev], check=True)
-        elif dev['mount']:  # si es solo una partición
-            subprocess.run(["udisksctl", "unmount", "-b", dev['dev']], check=True)
+        for part in dev.get("children", []):
+            if part.get("mount"):
+                subprocess.run(
+                    ["udisksctl", "unmount", "-b", part["dev"]],
+                    check=True
+                )
 
-        # Expulsar el disco
-        subprocess.run(["udisksctl", "power-off", "-b", dev['dev']], check=True)
-        custom_msgbox(usb_win, f"{dev['name']} expulsado correctamente")
+        custom_msgbox(
+            usb_win,
+           
+            f"{dev['name']} desmontado correctamente"
+        )
+        subprocess.run(["udisksctl", "power-off", "-b", dev["dev"]], check=True)
+        custom_msgbox(
+            usb_win,
+            f"{dev['name']} expulsado completamente"
+        )
+
+
     except subprocess.CalledProcessError as e:
-        custom_msgbox(usb_win, f"No se pudo expulsar {dev['name']}.\n{e}", title="Error")
+        custom_msgbox(
+            usb_win,
+            f"No se pudo desmontar {dev['name']}\n{e}",
+            title="Error"
+        )
+
 
 
 # -----------------------------
@@ -628,6 +660,7 @@ manual_pwm = tk.IntVar(value=128)
 curve_vars=[]
 last_state=None
 monitor_win = None
+control_fan_win = None
 # Históricos y líneas gráficas
 cpu_hist=deque([0]*HISTORY,maxlen=HISTORY)
 ram_hist=deque([0]*HISTORY,maxlen=HISTORY)
@@ -724,104 +757,126 @@ else:
 CTRL_W, CTRL_H = 800, 480
 root.geometry(f"{CTRL_W}x{CTRL_H}+{DSI_X}+{DSI_Y}")
 root.resizable(False, False)
-
-# -----------------------------
-# ---------- Layout principal ----------
-# -----------------------------
 main = tk.Frame(root, bg="black"); main.pack(fill="both", expand=True)
-top = tk.Frame(main, bg="black"); top.pack(fill="both", expand=True, padx=6, pady=(6,2))
+line_1 = tk.Frame(main, bg="black"); line_1.pack(fill="both", expand=True, padx=6, pady=2)
+line_2 = tk.Frame(main, bg="black"); line_2.pack(fill="both", expand=True, padx=6, pady=2)
+line_3 = tk.Frame(main, bg="black"); line_3.pack(fill="both", expand=True, padx=6, pady=2)
 bottom = tk.Frame(main, bg="black"); bottom.pack(fill="x", padx=8, pady=(0,4))
 
-# -----------------------------
-# ---------- Modo ----------
-# -----------------------------
-mode_frame = tk.LabelFrame(top, text="Modo", fg="white", bg="black", labelanchor="nw", padx=10, pady=8)
-mode_frame.pack(fill="x", pady=4)
-modes_row = tk.Frame(mode_frame, bg="black"); modes_row.pack(anchor="w")
+make_futuristic_button(bottom, "Salir", root.destroy).pack(side="right", padx=10)
+def open_fan_control():
+    global mode_var, manual_pwm, curve_vars, control_fan_win
+    
+    if control_fan_win and control_fan_win.winfo_exists():
+        control_fan_win.lift()
+        return
+    control_fan_win = tk.Toplevel(root)
+    control_fan_win.title("System Monitor")
+    control_fan_win.configure(bg="black")
+    control_fan_win.overrideredirect(True)
+    control_fan_win.geometry(f"{DSI_WIDTH}x{DSI_HEIGHT}+{DSI_X}+{DSI_Y}")
+    control_fan_win.resizable(False, False)
+    # -----------------------------
+    # ---------- Layout principal ----------
+    # -----------------------------
+    main = tk.Frame(control_fan_win, bg="black"); main.pack(fill="both", expand=True)
+    top = tk.Frame(main, bg="black"); top.pack(fill="both", expand=True, padx=6, pady=2)
+    bottom = tk.Frame(main, bg="black"); bottom.pack(fill="x", padx=8, pady=4)
 
-def set_mode(mode):
-    """Actualiza modo y guarda en estado"""
-    mode_var.set(mode)
-    write_state({"mode":mode,"target_pwm":None})
+    # -----------------------------
+    # ---------- Modo ----------
+    # -----------------------------
+    mode_frame = tk.LabelFrame(top, text="Modo", fg="white", bg="black", labelanchor="nw", padx=5, pady=5)
+    mode_frame.pack(fill="x", pady=4)
+    modes_row = tk.Frame(mode_frame, bg="black"); modes_row.pack(anchor="w")
 
-for m in ("auto","silent","normal","performance","manual"):
-    rb = tk.Radiobutton(modes_row, text=m.upper(), variable=mode_var, value=m,
-                        command=lambda m=m: set_mode(m), bg="black", fg="white", selectcolor="black")
-    rb.pack(side="left", padx=6)
-    style_radiobutton(rb)
+    def set_mode(mode):
+        """Actualiza modo y guarda en estado"""
+        mode_var.set(mode)
+        write_state({"mode":mode,"target_pwm":None})
 
-# -----------------------------
-# ---------- PWM Manual ----------
-# -----------------------------
-manual_frame = tk.LabelFrame(top, text="Control manual PWM", fg="white", bg="black", labelanchor="nw", padx=10, pady=8)
-manual_frame.pack(fill="x", pady=4)
-manual_row = tk.Frame(manual_frame, bg="black"); manual_row.pack(fill="x")
+    for m in ("auto","silent","normal","performance","manual"):
+        rb = tk.Radiobutton(modes_row, text=m.upper(), variable=mode_var, value=m,
+                            command=lambda m=m: set_mode(m), bg="black", fg="white", selectcolor="black")
+        rb.pack(side="left", padx=6)
+        style_radiobutton(rb)
 
-manual_scale = tk.Scale(manual_row, from_=0, to=255, orient="horizontal", variable=manual_pwm,
-                        bg="black", fg="white", highlightthickness=0, length=560, sliderlength=36, width=30)
-manual_scale.pack(side="left", fill="x", expand=True)
-style_slider(manual_scale)
+    # -----------------------------
+    # ---------- PWM Manual ----------
+    # -----------------------------
+    manual_frame = tk.LabelFrame(top, text="Control manual PWM", fg="white", bg="black", labelanchor="nw", padx=5, pady=5)
+    manual_frame.pack(fill="x", pady=4)
+    manual_row = tk.Frame(manual_frame, bg="black"); manual_row.pack(fill="x")
 
-manual_lbl = tk.Label(manual_row, textvariable=manual_pwm, fg="white", bg="black", width=4,
-                      font=("FiraFiraMono Nerd Font", 20, "bold"))
-manual_lbl.pack(side="left", padx=12)
+    manual_scale = tk.Scale(manual_row, from_=0, to=255, orient="horizontal", variable=manual_pwm,
+                            bg="black", fg="white", highlightthickness=0, length=560, sliderlength=36, width=30)
+    manual_scale.pack(side="left", fill="x", expand=True)
+    style_slider(manual_scale)
 
-# Al mover el slider, si estamos en manual, actualizamos el estado
-manual_scale.configure(command=lambda val: write_state({"mode":"manual","target_pwm":max(0,min(255,int(float(val))))}) if mode_var.get()=="manual" else None)
+    manual_lbl = tk.Label(manual_row, textvariable=manual_pwm, fg="white", bg="black", width=4,
+                        font=("FiraFiraMono Nerd Font", 20, "bold"))
+    manual_lbl.pack(side="left", padx=12)
 
-# -----------------------------
-# ---------- Curva ----------
-# -----------------------------
-curve_frame = tk.LabelFrame(top, text="Curva térmica", fg="white", bg="black", labelanchor="nw", padx=10, pady=8)
-curve_frame.pack(fill="both", expand=True, pady=4)
+    # Al mover el slider, si estamos en manual, actualizamos el estado
+    manual_scale.configure(command=lambda val: write_state({"mode":"manual","target_pwm":max(0,min(255,int(float(val))))}) if mode_var.get()=="manual" else None)
 
-canvas = tk.Canvas(curve_frame, bg="black", highlightthickness=0, height=180)
-canvas.pack(side="left", fill="both", expand=True)
+    # -----------------------------
+    # ---------- Curva ----------
+    # -----------------------------
+    curve_frame = tk.LabelFrame(top, text="Curva térmica", fg="white", bg="black", labelanchor="nw", padx=5, pady=5)
+    curve_frame.pack(fill="both", expand=True, pady=4)
 
-scrollbar = tk.Scrollbar(curve_frame, orient="vertical", command=canvas.yview, width=30)
-scrollbar.pack(side="right", fill="y")
-canvas.configure(yscrollcommand=scrollbar.set)
-style_scrollbar(scrollbar)
+    canvas = tk.Canvas(curve_frame, bg="black", highlightthickness=0, height=180)
+    canvas.pack(side="left", fill="both", expand=True)
 
-curve_inner = tk.Frame(canvas, bg="black")
-canvas.create_window((0,0), window=curve_inner, anchor="nw")
+    scrollbar = tk.Scrollbar(curve_frame, orient="vertical", command=canvas.yview, width=30)
+    scrollbar.pack(side="right", fill="y")
+    canvas.configure(yscrollcommand=scrollbar.set)
+    style_scrollbar(scrollbar)
 
-curve_inner.bind("<Configure>", lambda e: canvas.configure(scrollregion=canvas.bbox("all")))
+    curve_inner = tk.Frame(canvas, bg="black")
+    canvas.create_window((0,0), window=curve_inner, anchor="nw")
 
-curve_vars.clear()
-for p in load_curve():
-    row = tk.Frame(curve_inner, bg="black"); row.pack(fill="x", pady=6)
-    tk.Label(row, text=f'{p["temp"]}°C', fg="white", bg="black", width=6).pack(side="left")
-    var = tk.IntVar(value=p["pwm"])
-    tk.Label(row, textvariable=var, fg="white", bg="black", width=4).pack(side="right")
-    scale = tk.Scale(row, from_=0, to=255, orient="horizontal", variable=var,
-                     bg="black", fg="white", highlightthickness=0, length=520, sliderlength=28, width=30)
-    scale.pack(side="left", fill="x", expand=True, padx=6)
-    style_slider(scale)
-    curve_vars.append((p["temp"], var))
+    curve_inner.bind("<Configure>", lambda e: canvas.configure(scrollregion=canvas.bbox("all")))
 
-# -----------------------------
-# ---------- Actions ----------
-# -----------------------------
-actions = tk.Frame(bottom, bg="black"); actions.pack(fill="x", pady=4)
+    curve_vars.clear()
+    for p in load_curve():
+        row = tk.Frame(curve_inner, bg="black"); row.pack(fill="x", pady=6)
+        tk.Label(row, text=f'{p["temp"]}°C', fg="white", bg="black", width=6).pack(side="left")
+        var = tk.IntVar(value=p["pwm"])
+        tk.Label(row, textvariable=var, fg="white", bg="black", width=4).pack(side="right")
+        scale = tk.Scale(row, from_=0, to=255, orient="horizontal", variable=var,
+                        bg="black", fg="white", highlightthickness=0, length=520, sliderlength=28, width=30)
+        scale.pack(side="left", fill="x", expand=True, padx=6)
+        style_slider(scale)
+        curve_vars.append((p["temp"], var))
 
-def save_curve():
-    """Guarda los sliders actuales en el archivo JSON"""
-    data = {"points":[{"temp":t,"pwm":v.get()} for t,v in curve_vars]}
-    with open(CURVE_FILE, "w") as f: json.dump(data, f, indent=2)
-    custom_msgbox(root, "Curva guardada correctamente", "Guardado")
+    # -----------------------------
+    # ---------- Actions ----------
+    # -----------------------------
+    actions = tk.Frame(bottom, bg="black"); actions.pack(fill="x", pady=4)
 
-def restore_default():
-    """Restaura la curva por defecto y actualiza sliders"""
-    default = [{"temp":40,"pwm":100},{"temp":50,"pwm":130},{"temp":60,"pwm":160},{"temp":70,"pwm":180},{"temp":80,"pwm":255}]
-    with open(CURVE_FILE, "w") as f: json.dump({"points":default}, f, indent=2)
-    # --- Actualizamos los sliders para reflejar la curva por defecto ---
-    for t_var, (t, var) in zip(default, curve_vars):
-        var.set(t_var["pwm"])
-    custom_msgbox(root, "Curva restaurada por defecto", "Restaurado")
+    def save_curve():
+        """Guarda los sliders actuales en el archivo JSON"""
+        data = {"points":[{"temp":t,"pwm":v.get()} for t,v in curve_vars]}
+        with open(CURVE_FILE, "w") as f: json.dump(data, f, indent=2)
+        custom_msgbox(root, "Curva guardada correctamente", "Guardado")
 
-make_futuristic_button(actions,"Guardar curva", save_curve, width=16, height=2).pack(side="left", padx=10)
-make_futuristic_button(actions,"Restaurar por defecto", restore_default, width=18, height=2).pack(side="left", padx=10)
+    def restore_default():
+        """Restaura la curva por defecto y actualiza sliders"""
+        default = [{"temp":40,"pwm":100},{"temp":50,"pwm":130},{"temp":60,"pwm":160},{"temp":70,"pwm":180},{"temp":80,"pwm":255}]
+        with open(CURVE_FILE, "w") as f: json.dump({"points":default}, f, indent=2)
+        # --- Actualizamos los sliders para reflejar la curva por defecto ---
+        for t_var, (t, var) in zip(default, curve_vars):
+            var.set(t_var["pwm"])
+        custom_msgbox(root, "Curva restaurada por defecto", "Restaurado")
+
+    make_futuristic_button(actions,"Guardar curva", save_curve).pack(side="left", padx=10)
+    make_futuristic_button(actions,"Restaurar por defecto", restore_default).pack(side="left", padx=10)
+    make_futuristic_button(actions, "Cerrar", lambda: control_fan_win.destroy(), width=20).pack(side="right", padx=10)
+
+make_futuristic_button(line_1, "Control Ventiladores", open_fan_control).pack(side="left", padx=10)
+
 
 # ---------- Ventana monitor placa ----------
 monitor_win = None
@@ -851,7 +906,7 @@ def open_monitor_window():
 
     # --- Sección hardware ---
     section_hw = tk.Frame(main_frame, bg="black")
-    section_hw.pack(fill="both", expand=True, pady=(0,10))
+    section_hw.pack(fill="both", expand=True, pady=5)
 
     hw_canvas = tk.Canvas(section_hw, bg="black", highlightthickness=0)
     hw_canvas.pack(side="left", fill="both", expand=True)
@@ -888,14 +943,12 @@ def open_monitor_window():
     section_bottom.pack(fill="x")
     bottom_frame = tk.Frame(section_bottom, bg="black"); bottom_frame.pack(fill="x", padx=8, pady=6)
 
-    make_futuristic_button(bottom_frame, "Red", open_net_window, width=12, height=2).pack(side="left", padx=10)
-    make_futuristic_button(bottom_frame, "USB", open_usb_window, width=12, height=2).pack(side="left", padx=10)
-    make_futuristic_button(bottom_frame, "Cerrar", lambda: monitor_win.destroy(), width=12, height=2).pack(side="right", padx=10)
+    make_futuristic_button(bottom_frame, "Red", open_net_window, width=20).pack(side="left", padx=10)
+    make_futuristic_button(bottom_frame, "USB", open_usb_window, width=20).pack(side="left", padx=10)
+    make_futuristic_button(bottom_frame, "Cerrar", lambda: monitor_win.destroy()).pack(side="right", padx=10)
 
-# ---------- Botones principales ----------
-make_futuristic_button(actions, "Mostrar gráficas", open_monitor_window, width=14, height=2).pack(side="left", padx=10)
-make_futuristic_button(actions, "Salir", root.destroy, width=12, height=2).pack(side="right", padx=10)
-
+make_futuristic_button(line_1, "Monitor Placa", open_monitor_window).pack(side="left", padx=10)
+    
 # -----------------------------
 # ---------- Ventana monitor de red ----------
 # -----------------------------
@@ -921,7 +974,7 @@ def open_net_window():
     main_frame.pack(fill="both", expand=True)
 
     net_section = tk.Frame(main_frame, bg="black")
-    net_section.pack(fill="both", expand=True, pady=(0, 10))
+    net_section.pack(fill="both", expand=True, pady=5)
 
     net_canvas = tk.Canvas(net_section, bg="black", highlightthickness=0)
     net_canvas.pack(side="left", fill="both", expand=True)
@@ -978,11 +1031,11 @@ def open_net_window():
         bottom,
         "Test velocidad",
         start_speedtest,
-        width=16,
-        height=2
     ).pack(side="left", padx=10)
 
-    make_futuristic_button(bottom, "Cerrar", lambda: net_win.destroy(), width=12, height=2).pack(side="right", padx=10)
+    make_futuristic_button(bottom, "Cerrar", lambda: net_win.destroy()).pack(side="right", padx=10)
+
+make_futuristic_button(line_1, "Monitor Red", open_net_window).pack(side="left", padx=10)
 
 def open_usb_window():
     """
@@ -1005,7 +1058,7 @@ def open_usb_window():
     main_frame = tk.Frame(usb_win, bg="black")
     main_frame.pack(fill="both", expand=True)
     usb_section = tk.Frame(main_frame, bg="black")
-    usb_section.pack(fill="both", expand=True, pady=(0, 10))
+    usb_section.pack(fill="both", expand=True, pady=5)
     # Scrollable frame
     usb_scroll_canvas = tk.Canvas(usb_section, bg="black", highlightthickness=0)
     usb_scroll_canvas.pack(side="left", fill="both", expand=True)
@@ -1025,16 +1078,99 @@ def open_usb_window():
 
     # Botón cerrar siempre abajo
     bottom_frame = tk.Frame(main_frame, bg="black")
-    bottom_frame.pack(fill="x", pady=6)
-    make_futuristic_button(bottom_frame, "Cerrar", usb_win.destroy, width=12, height=2).pack(side="right", padx=10)
+    bottom_frame.pack(fill="x", pady=6, padx=8)
+    make_futuristic_button(bottom_frame, "Cerrar", usb_win.destroy).pack(side="right", padx=10)
     refresh_btn = make_futuristic_button(
-        bottom_frame, "Refrescar USB", refresh_usb_devices, width=16, height=2
+        bottom_frame, "Refrescar USB", refresh_usb_devices
     )
-    refresh_btn.pack(anchor="w", pady=(10, 10))
+    refresh_btn.pack(anchor="w", pady=5)
 
     # Carga inicial
     refresh_usb_devices()
 
+make_futuristic_button(line_2, "Monitor USB", open_usb_window).pack(side="left", padx=10)
+
+def run_script(script_path):
+    def _run():
+        try:
+            proc = subprocess.run(
+                [script_path],
+                capture_output=True,
+                text=True,
+                check=True
+            )
+            if proc.stdout.strip():
+                custom_msgbox(root, proc.stdout, "Salida")
+        except subprocess.CalledProcessError as e:
+            custom_msgbox(
+                root,
+                f"Error ejecutando script:\n{e.stderr or e}",
+                "Error"
+            )
+        except Exception as e:
+            custom_msgbox(root, str(e), "Error")
+
+    threading.Thread(target=_run, daemon=True).start()
+
+def open_lanzadores():
+    global lanzadores_win
+
+    if 'lanzadores_win' in globals() and lanzadores_win and lanzadores_win.winfo_exists():
+        lanzadores_win.lift()
+        return
+
+    lanzadores_win = tk.Toplevel(root)
+    lanzadores_win.title("Lanzadores")
+    lanzadores_win.configure(bg="black")
+    lanzadores_win.overrideredirect(True)
+    lanzadores_win.geometry(f"{DSI_WIDTH}x{DSI_HEIGHT}+{DSI_X}+{DSI_Y}")
+    lanzadores_win.resizable(False, False)
+
+    main = tk.Frame(lanzadores_win, bg="black")
+    main.pack(fill="both", expand=True, padx=5, pady=5)
+    title = tk.Label(
+        main,
+        text="LANZADORES",
+        fg="#14611E",
+        bg="black",
+        font=("FiraFiraMono Nerd Font", 24, "bold")
+    )
+    title.pack(anchor="w", pady=(0, 20))
+    top = tk.Frame(main, bg="black")
+    top.pack(fill="both", expand=True, pady=5)
+    lanzadore_canvas = tk.Canvas(top, bg="black", highlightthickness=0)
+    lanzadore_canvas.pack(side="left", fill="both", expand=True)
+    lanzadores_scrollbar = tk.Scrollbar(top, orient="vertical", command=lanzadore_canvas.yview, width=30)
+    lanzadores_scrollbar.pack(side="right", fill="y")
+    style_scrollbar(lanzadores_scrollbar)
+    lanzadore_canvas.configure(yscrollcommand=lanzadores_scrollbar.set)
+    lanzadores_inner = tk.Frame(lanzadore_canvas, bg="black")
+    lanzadore_canvas.create_window((0,0), window=lanzadores_inner, anchor="nw", width=DSI_WIDTH-35)
+    lanzadores_inner.bind("<Configure>", lambda e: lanzadore_canvas.configure(scrollregion=lanzadore_canvas.bbox("all")))
+
+
+    # --- Botones ---
+    for launcher in LAUNCHERS:
+        btn = make_futuristic_button(
+            lanzadores_inner,
+            launcher["label"],
+            command=lambda s=launcher["script"]: run_script(s),
+            width=80,
+            font_size=30
+        )
+        btn.pack(anchor="center", pady=6)
+
+    # --- Cerrar ---
+    bottom = tk.Frame(main, bg="black")
+    bottom.pack(side="bottom", fill="x", pady=10)
+
+    make_futuristic_button(
+        bottom,
+        "Cerrar",
+        lanzadores_win.destroy
+    ).pack(side="right")
+
+make_futuristic_button(line_2, "Lanzadores", open_lanzadores).pack(side="left", padx=10)
 
 # -----------------------------
 # ---------- Update loop ----------
