@@ -99,10 +99,26 @@ def make_futuristic_button(parent, text, command=None, width=None, height=None, 
 def style_slider(slider, color="#00ffff"):
     slider.config(troughcolor="#14611E", sliderrelief="flat", bd=0,
                   highlightthickness=0, fg=color, bg="#111111", activebackground=color)
+def style_slider_ctk(slider, color="#00ffff"):
+    slider.configure(
+        fg_color="#14611E",          # fondo del rail
+        progress_color=color,        # parte activa
+        button_color=color,          # botón
+        button_hover_color=color,
+        height=30
+    )
 
 def style_scrollbar(sb, color="#111111"):
     sb.config(troughcolor="#14611E", bg=color, activebackground=color,
               highlightthickness=0, relief="flat")
+
+def style_ctk_scrollbar(scrollable_frame, color="#14611E"):
+    scrollable_frame.configure(
+        scrollbar_fg_color=color,
+        scrollbar_button_color="#111111",
+        scrollbar_button_hover_color="#595757"
+    )
+
 
 def custom_msgbox(parent, text, title="Info"):
     popup = tk.Toplevel(parent)
@@ -612,7 +628,7 @@ def refresh_usb_devices():
         for idx, dev in enumerate(others):
             text = parse_lsusb_line(dev['name'])
             lbl = tk.Label(usb_inner_frame, text=text, fg="#00ffff", bg="black",
-                        font=("FiraFiraMono Nerd Font", 16), anchor="w", justify="left", wraplength=DSI_WIDTH-60)
+                        font=("FiraMono Nerd Font", 16), anchor="w", justify="left", wraplength=DSI_WIDTH-60)
             lbl.pack(anchor="w", pady=1)
             usb_devices_labels[f"other_{idx}"] = lbl
 
@@ -649,7 +665,9 @@ def eject_usb_device_with_popup(dev):
 # -----------------------------
 # ---------- Variables globales ----------
 # -----------------------------
-root = tk.Tk()
+ctk.set_appearance_mode("dark")      # o "light"
+ctk.set_default_color_theme("dark-blue")
+root = ctk.CTk()
 root.title("Fan Control")
 root.configure(bg="black")
 root.overrideredirect(True)
@@ -757,12 +775,11 @@ else:
 CTRL_W, CTRL_H = 800, 480
 root.geometry(f"{CTRL_W}x{CTRL_H}+{DSI_X}+{DSI_Y}")
 root.resizable(False, False)
-main = tk.Frame(root, bg="black"); main.pack(fill="both", expand=True)
-line_1 = tk.Frame(main, bg="black"); line_1.pack(fill="both", expand=True, padx=6, pady=2)
-line_2 = tk.Frame(main, bg="black"); line_2.pack(fill="both", expand=True, padx=6, pady=2)
-line_3 = tk.Frame(main, bg="black"); line_3.pack(fill="both", expand=True, padx=6, pady=2)
-bottom = tk.Frame(main, bg="black"); bottom.pack(fill="x", padx=8, pady=(0,4))
-
+main = ctk.CTkFrame(root); main.pack(fill="both", expand=True)
+line_1 = ctk.CTkFrame(main); line_1.pack(fill="both", expand=True, padx=6, pady=2)
+line_2 = ctk.CTkFrame(main); line_2.pack(fill="both", expand=True, padx=6, pady=2)
+line_3 = ctk.CTkFrame(main); line_3.pack(fill="both", expand=True, padx=6, pady=2)
+bottom = ctk.CTkFrame(main); bottom.pack(fill="x", padx=8, pady=(0,4))
 make_futuristic_button(bottom, "Salir", root.destroy).pack(side="right", padx=10)
 def open_fan_control():
     global mode_var, manual_pwm, curve_vars, control_fan_win
@@ -770,91 +787,173 @@ def open_fan_control():
     if control_fan_win and control_fan_win.winfo_exists():
         control_fan_win.lift()
         return
-    control_fan_win = tk.Toplevel(root)
+    control_fan_win = ctk.CTkToplevel(root)
     control_fan_win.title("System Monitor")
-    control_fan_win.configure(bg="black")
+    control_fan_win.configure(bg="transparent")
     control_fan_win.overrideredirect(True)
     control_fan_win.geometry(f"{DSI_WIDTH}x{DSI_HEIGHT}+{DSI_X}+{DSI_Y}")
     control_fan_win.resizable(False, False)
     # -----------------------------
     # ---------- Layout principal ----------
     # -----------------------------
-    main = tk.Frame(control_fan_win, bg="black"); main.pack(fill="both", expand=True)
-    top = tk.Frame(main, bg="black"); top.pack(fill="both", expand=True, padx=6, pady=2)
-    bottom = tk.Frame(main, bg="black"); bottom.pack(fill="x", padx=8, pady=4)
+    main = ctk.CTkFrame(control_fan_win, bg_color="transparent"); main.pack(fill="both", expand=True)
+    top = ctk.CTkFrame(main, bg_color="transparent"); top.pack(fill="both", expand=True, padx=6, pady=2)
+    bottom = ctk.CTkFrame(main, bg_color="transparent"); bottom.pack(fill="x", padx=8, pady=4)
 
     # -----------------------------
     # ---------- Modo ----------
     # -----------------------------
-    mode_frame = tk.LabelFrame(top, text="Modo", fg="white", bg="black", labelanchor="nw", padx=5, pady=5)
+    mode_frame = ctk.CTkFrame(top, bg_color="transparent")
     mode_frame.pack(fill="x", pady=4)
-    modes_row = tk.Frame(mode_frame, bg="black"); modes_row.pack(anchor="w")
+
+    mode_label = ctk.CTkLabel(
+        mode_frame,
+        text="Modo",
+        font=("FiraMono Nerd Font", 18, "bold")
+    )
+    mode_label.pack(anchor="w", padx=6, pady=(4, 2))
+
+    modes_row = ctk.CTkFrame(mode_frame, bg_color="transparent", width=DSI_WIDTH-12)
+    modes_row.pack(anchor="w", padx=6, pady=4)
+
 
     def set_mode(mode):
         """Actualiza modo y guarda en estado"""
         mode_var.set(mode)
         write_state({"mode":mode,"target_pwm":None})
 
-    for m in ("auto","silent","normal","performance","manual"):
-        rb = tk.Radiobutton(modes_row, text=m.upper(), variable=mode_var, value=m,
-                            command=lambda m=m: set_mode(m), bg="black", fg="white", selectcolor="black")
+    for m in ("auto", "silent", "normal", "performance", "manual"):
+        rb = ctk.CTkRadioButton(
+            modes_row,
+            text=m.upper(),
+            variable=mode_var,
+            value=m,
+            command=lambda m=m: set_mode(m),
+            radiobutton_width=25,
+            radiobutton_height=25,
+            font=("FiraMono Nerd Font", 18, "bold"),
+            fg_color="#00ffff",
+        )
         rb.pack(side="left", padx=6)
-        style_radiobutton(rb)
+
 
     # -----------------------------
     # ---------- PWM Manual ----------
     # -----------------------------
-    manual_frame = tk.LabelFrame(top, text="Control manual PWM", fg="white", bg="black", labelanchor="nw", padx=5, pady=5)
+    # Frame principal (equivale a LabelFrame)
+    manual_frame = ctk.CTkFrame(top)
     manual_frame.pack(fill="x", pady=4)
-    manual_row = tk.Frame(manual_frame, bg="black"); manual_row.pack(fill="x")
 
-    manual_scale = tk.Scale(manual_row, from_=0, to=255, orient="horizontal", variable=manual_pwm,
-                            bg="black", fg="white", highlightthickness=0, length=560, sliderlength=36, width=30)
+    manual_title = ctk.CTkLabel(
+        manual_frame,
+        text="Control manual PWM",
+        font=("FiraMono Nerd Font", 18, "bold")
+    )
+    manual_title.pack(anchor="w", padx=6, pady=(4, 2))
+
+    manual_row = ctk.CTkFrame(manual_frame)
+    manual_row.pack(fill="x", padx=6, pady=4)
+
+    # Slider (equivale a Scale)
+    manual_scale = ctk.CTkSlider(
+        manual_row,
+        from_=0,
+        to=255,
+        variable=manual_pwm,
+        number_of_steps=255
+    )
     manual_scale.pack(side="left", fill="x", expand=True)
-    style_slider(manual_scale)
+    style_slider_ctk(manual_scale)
 
-    manual_lbl = tk.Label(manual_row, textvariable=manual_pwm, fg="white", bg="black", width=4,
-                        font=("FiraFiraMono Nerd Font", 20, "bold"))
+    # Label que muestra el valor (igual que antes)
+    manual_lbl = ctk.CTkLabel(
+        manual_row,
+        textvariable=manual_pwm,
+        width=40,
+        font=("FiraMono Nerd Font", 18, "bold")
+    )
     manual_lbl.pack(side="left", padx=12)
 
-    # Al mover el slider, si estamos en manual, actualizamos el estado
-    manual_scale.configure(command=lambda val: write_state({"mode":"manual","target_pwm":max(0,min(255,int(float(val))))}) if mode_var.get()=="manual" else None)
+    # MISMA lógica, MISMO lambda
+    manual_scale.configure(
+        command=lambda val:
+            write_state(
+                {
+                    "mode": "manual",
+                    "target_pwm": max(0, min(255, int(float(val))))
+                }
+            ) if mode_var.get() == "manual" else None
+    )
+
 
     # -----------------------------
     # ---------- Curva ----------
     # -----------------------------
-    curve_frame = tk.LabelFrame(top, text="Curva térmica", fg="white", bg="black", labelanchor="nw", padx=5, pady=5)
+    # Frame principal (antes LabelFrame)
+    curve_frame = ctk.CTkFrame(top)
     curve_frame.pack(fill="both", expand=True, pady=4)
 
-    canvas = tk.Canvas(curve_frame, bg="black", highlightthickness=0, height=180)
-    canvas.pack(side="left", fill="both", expand=True)
+    curve_title = ctk.CTkLabel(
+        curve_frame,
+        text="Curva térmica",
+        font=("FiraMono Nerd Font", 18, "bold")
+    )
+    curve_title.pack(anchor="w", padx=6, pady=(4, 2))
 
-    scrollbar = tk.Scrollbar(curve_frame, orient="vertical", command=canvas.yview, width=30)
-    scrollbar.pack(side="right", fill="y")
-    canvas.configure(yscrollcommand=scrollbar.set)
-    style_scrollbar(scrollbar)
+    # Canvas y scrollbar se quedan en Tk
+    curve_inner = ctk.CTkScrollableFrame(
+        curve_frame,
+        height=180,
+        )
+    curve_inner.pack(fill="both", expand=True, padx=6, pady=4)
 
-    curve_inner = tk.Frame(canvas, bg="black")
-    canvas.create_window((0,0), window=curve_inner, anchor="nw")
+    # Aplica el estilo igual que en Tk
+    style_ctk_scrollbar(curve_inner)
 
-    curve_inner.bind("<Configure>", lambda e: canvas.configure(scrollregion=canvas.bbox("all")))
 
+    
+    # Contenido dinámico
     curve_vars.clear()
+
     for p in load_curve():
-        row = tk.Frame(curve_inner, bg="black"); row.pack(fill="x", pady=6)
-        tk.Label(row, text=f'{p["temp"]}°C', fg="white", bg="black", width=6).pack(side="left")
+
+        row = ctk.CTkFrame(curve_inner)
+        row.pack(fill="x", pady=6, padx=6)
+
+        ctk.CTkLabel(
+            row,
+            text=f'{p["temp"]}°C',
+            width=50,
+            font=("FiraMono Nerd Font", 16, "bold")
+        ).pack(side="left")
+
         var = tk.IntVar(value=p["pwm"])
-        tk.Label(row, textvariable=var, fg="white", bg="black", width=4).pack(side="right")
-        scale = tk.Scale(row, from_=0, to=255, orient="horizontal", variable=var,
-                        bg="black", fg="white", highlightthickness=0, length=520, sliderlength=28, width=30)
+
+        ctk.CTkLabel(
+            row,
+            textvariable=var,
+            width=40,
+            font=("FiraMono Nerd Font", 16, "bold")
+        ).pack(side="right")
+
+        scale = ctk.CTkSlider(
+            row,
+            from_=0,
+            to=255,
+            variable=var,
+            number_of_steps=255,
+            height=40
+        )
         scale.pack(side="left", fill="x", expand=True, padx=6)
-        style_slider(scale)
+
+        style_slider_ctk(scale)   # usa la versión CTk que te pasé antes
+
         curve_vars.append((p["temp"], var))
 
     # -----------------------------
     # ---------- Actions ----------
     # -----------------------------
-    actions = tk.Frame(bottom, bg="black"); actions.pack(fill="x", pady=4)
+    actions = ctk.CTkFrame(bottom); actions.pack(fill="x", pady=4)
 
     def save_curve():
         """Guarda los sliders actuales en el archivo JSON"""
@@ -864,7 +963,44 @@ def open_fan_control():
 
     def restore_default():
         """Restaura la curva por defecto y actualiza sliders"""
-        default = [{"temp":40,"pwm":100},{"temp":50,"pwm":130},{"temp":60,"pwm":160},{"temp":70,"pwm":180},{"temp":80,"pwm":255}]
+        default = [
+            {
+            "temp": 20,
+            "pwm": 20
+            },
+            {
+            "temp": 30,
+            "pwm": 50
+            },
+            {
+            "temp": 40,
+            "pwm": 100
+            },
+            {
+            "temp": 50,
+            "pwm": 130
+            },
+            {
+            "temp": 60,
+            "pwm": 160
+            },
+            {
+            "temp": 70,
+            "pwm": 180
+            },
+            {
+            "temp": 80,
+            "pwm": 200
+            },
+            {
+            "temp": 90,
+            "pwm": 220
+            },
+            {
+            "temp": 100,
+            "pwm": 255
+            }
+        ]
         with open(CURVE_FILE, "w") as f: json.dump({"points":default}, f, indent=2)
         # --- Actualizamos los sliders para reflejar la curva por defecto ---
         for t_var, (t, var) in zip(default, curve_vars):
@@ -894,18 +1030,18 @@ def open_monitor_window():
         monitor_win.lift()
         return
 
-    monitor_win = tk.Toplevel(root)
+    monitor_win = ctk.CTkToplevel(root)
     monitor_win.title("System Monitor")
     monitor_win.configure(bg="black")
     monitor_win.overrideredirect(True)
     monitor_win.geometry(f"{DSI_WIDTH}x{DSI_HEIGHT}+{DSI_X}+{DSI_Y}")
     monitor_win.resizable(False, False)
 
-    main_frame = tk.Frame(monitor_win, bg="black")
+    main_frame = ctk.CTkFrame(monitor_win)
     main_frame.pack(fill="both", expand=True)
 
     # --- Sección hardware ---
-    section_hw = tk.Frame(main_frame, bg="black")
+    section_hw = ctk.CTkFrame(main_frame)
     section_hw.pack(fill="both", expand=True, pady=5)
 
     hw_canvas = tk.Canvas(section_hw, bg="black", highlightthickness=0)
@@ -939,9 +1075,9 @@ def open_monitor_window():
     disk_read_lines = init_graph_lines(disk_read_cvs, HISTORY, disk_read_lvl.cget("fg"))
 
     # --- Sección inferior ---
-    section_bottom = tk.Frame(main_frame, bg="black")
+    section_bottom = ctk.CTkFrame(main_frame)
     section_bottom.pack(fill="x")
-    bottom_frame = tk.Frame(section_bottom, bg="black"); bottom_frame.pack(fill="x", padx=8, pady=6)
+    bottom_frame = ctk.CTkFrame(section_bottom); bottom_frame.pack(fill="x", padx=8, pady=6)
 
     make_futuristic_button(bottom_frame, "Red", open_net_window, width=20).pack(side="left", padx=10)
     make_futuristic_button(bottom_frame, "USB", open_usb_window, width=20).pack(side="left", padx=10)
