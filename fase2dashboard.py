@@ -72,7 +72,7 @@ LAUNCHERS = [
 # -----------------------------
 def style_radiobutton_tk(rb, fg="#00ffff", bg="#111111", hover_fg="#1ae313"):
     rb.config(fg=fg, bg=bg, selectcolor=bg, activeforeground=fg, activebackground=bg,
-              font=("FiraFiraMono Nerd Font", 14, "bold"), indicatoron=True)
+              font=("FiraMono Nerd Font", 14, "bold"), indicatoron=True)
     def on_enter(e): rb.config(fg=hover_fg)
     def on_leave(e): rb.config(fg=fg)
     rb.bind("<Enter>", on_enter)
@@ -88,7 +88,7 @@ def style_radiobutton_ctk(rb):
     
 def make_futuristic_button(parent, text, command=None, width=None, height=None, font_size=None):
     if width is None:
-        width = 30
+        width = 20
     if height is None:
         height = 10
     if font_size is None:
@@ -97,7 +97,7 @@ def make_futuristic_button(parent, text, command=None, width=None, height=None, 
                     fg_color="#111111", hover_color="#222222",
                     border_width=3, border_color="#00ffff",
                     width=width*8, height=height*8,
-                    font=("FiraFiraMono Nerd Font", font_size, "bold"), corner_radius=10)
+                    font=("FiraMono Nerd Font", font_size, "bold"), corner_radius=10)
     def on_enter(e): btn.configure(fg_color="#222222")
     def on_leave(e): btn.configure(fg_color="#111111")
     btn.bind("<Enter>", on_enter)
@@ -147,14 +147,14 @@ def custom_msgbox(parent, text, title="Info"):
     title_lbl = ctk.CTkLabel(
         frame, text=title,
         text_color="#00ffff",
-        font=("FiraFiraMono Nerd Font", 16, "bold")
+        font=("FiraMono Nerd Font", 20, "bold")
     )
     title_lbl.pack(anchor="center", pady=(0, 10))
 
     text_lbl = ctk.CTkLabel(
         frame, text=text,
         text_color="#ffffff",
-        font=("FiraFiraMono Nerd Font", 14),
+        font=("FiraMono Nerd Font", 18),
         compound="left",
         wraplength=800   # límite lógico, no tamaño final
     )
@@ -318,9 +318,9 @@ def smooth(data, n=5):
     return out
 
 def make_block(parent,title):
-    lbl=tk.Label(parent,text=title,fg="white",bg="#212121",font=("FiraMono Nerd Font",16))
+    lbl=tk.Label(parent,text=title,fg="white",bg="#212121",font=("FiraMono Nerd Font",22))
     lbl.pack(anchor="w")
-    val=tk.Label(parent,fg="white",bg="#212121",font=("FiraMono Nerd Font",22,"bold"))
+    val=tk.Label(parent,fg="white",bg="#212121",font=("FiraMono Nerd Font",26,"bold"))
     val.pack(anchor="e")
     cvs=tk.Canvas(parent,width=WIDTH,height=HEIGHT,bg="#212121",highlightthickness=0)
     cvs.pack()
@@ -592,16 +592,16 @@ def refresh_usb_devices():
 
     # --- Almacenamiento USB ---
     if storage:
-        lbl_title = tk.Label(usb_inner_frame, text="Almacenamiento USB:", fg="#14611E", bg="#212121",
-                            font=("FiraFiraMono Nerd Font", 20, "bold"))
+        lbl_title = ctk.CTkLabel(usb_inner_frame, text="Almacenamiento USB:", text_color="#14611E", bg_color="#212121",
+                            font=("FiraMono Nerd Font", 25, "bold"))
         lbl_title.pack(anchor="w", pady=(10, 5))
         usb_devices_labels["storage_title"] = lbl_title
         for idx, dev in enumerate(storage):
             name = dev.get("model") or dev.get("name")
             size = dev.get("size")
             info_text = f"{name} ({dev['type']}) - {size}"
-            lbl = tk.Label(usb_inner_frame, text=info_text, fg="#00ffff", bg="#212121",
-                        font=("FiraFiraMono Nerd Font", 18), wraplength=DSI_WIDTH-60)
+            lbl = ctk.CTkLabel(usb_inner_frame, text=info_text, text_color="#00ffff", bg_color="#212121",
+                        font=("FiraMono Nerd Font", 20), wraplength=DSI_WIDTH-60)
             lbl.pack(anchor="w", pady=2)
             usb_devices_labels[f"storage_{idx}"] = lbl
 
@@ -628,12 +628,12 @@ def refresh_usb_devices():
             
 
                 # Creamos la etiqueta
-                part_lbl = tk.Label(
+                part_lbl = ctk.CTkLabel(
                     usb_inner_frame,
                     text=part_text,
-                    fg="#00ffff",
-                    bg="#212121",
-                    font=("FiraFiraMono Nerd Font", 16),
+                    text_color="#00ffff",
+                    bg_color="#212121",
+                    font=("FiraMono Nerd Font", 18),
                     wraplength=DSI_WIDTH-60
                 )
                 part_lbl.pack(anchor="w", padx=40, pady=1)
@@ -643,15 +643,15 @@ def refresh_usb_devices():
 
     # --- Otros dispositivos USB ---
     if others:
-        lbl_title = tk.Label(usb_inner_frame, text="Otros dispositivos USB:", fg="#14611E", bg="#212121",
-                             font=("FiraFiraMono Nerd Font", 20, "bold"))
+        lbl_title = ctk.CTkLabel(usb_inner_frame, text="Otros dispositivos USB:", text_color="#14611E", bg_color="#212121",
+                             font=("FiraMono Nerd Font", 25, "bold"))
         lbl_title.pack(anchor="w", pady=(10, 5))
         usb_devices_labels["others_title"] = lbl_title
 
         for idx, dev in enumerate(others):
             text = parse_lsusb_line(dev['name'])
-            lbl = tk.Label(usb_inner_frame, text=text, fg="#00ffff", bg="#212121",
-                        font=("FiraMono Nerd Font", 16), anchor="w", justify="left", wraplength=DSI_WIDTH-60)
+            lbl = ctk.CTkLabel(usb_inner_frame, text=text, text_color="#00ffff", bg_color="#212121",
+                        font=("FiraMono Nerd Font", 18), anchor="w", justify="left", wraplength=DSI_WIDTH-60)
             lbl.pack(anchor="w", pady=1)
             usb_devices_labels[f"other_{idx}"] = lbl
 
@@ -798,11 +798,46 @@ else:
 CTRL_W, CTRL_H = 800, 480
 root.geometry(f"{CTRL_W}x{CTRL_H}+{DSI_X}+{DSI_Y}")
 root.resizable(False, False)
-main = ctk.CTkFrame(root, bg_color="#212121"); main.pack(fill="both", expand=True)
-line_1 = ctk.CTkFrame(main, bg_color="#212121"); line_1.pack(fill="both", expand=True, padx=6, pady=2)
-line_2 = ctk.CTkFrame(main, bg_color="#212121"); line_2.pack(fill="both", expand=True, padx=6, pady=2)
-line_3 = ctk.CTkFrame(main, bg_color="#212121"); line_3.pack(fill="both", expand=True, padx=6, pady=2)
-bottom = ctk.CTkFrame(main, bg_color="#212121"); bottom.pack(fill="x", padx=8, pady=(0,4))
+main = ctk.CTkFrame(root, bg_color="#212121")
+main.pack(fill="both", expand=True)
+menu_frame = ctk.CTkFrame(main, bg_color="#212121")
+menu_frame.pack(fill="both", expand=True)
+# ---------- Canvas ----------
+menu_canvas = ctk.CTkCanvas(menu_frame, bg="#212121", highlightthickness=0)
+menu_canvas.pack(side="left", fill="both", expand=True)
+
+# ---------- Scrollbar ----------
+menu_scrollbar = ctk.CTkScrollbar(
+    menu_frame,
+    orientation="vertical",
+    command=menu_canvas.yview,
+    width=40  # 👈 aquí controlas el tamaño real
+)
+menu_scrollbar.pack(side="right", fill="y")
+
+style_scrollbar_ctk(menu_scrollbar)  # tu estilo personalizado
+
+menu_canvas.configure(yscrollcommand=menu_scrollbar.set)
+
+# ---------- Frame interno ----------
+menu_inner = ctk.CTkFrame(menu_canvas, bg_color="#212121")
+
+menu_canvas.create_window(
+    (0, 0),
+    window=menu_inner,
+    anchor="nw",
+    width=DSI_WIDTH - 50
+)
+
+menu_inner.bind(
+    "<Configure>",
+    lambda e: menu_canvas.configure(scrollregion=menu_canvas.bbox("all"))
+)
+
+#line_1 = ctk.CTkFrame(main, bg_color="#212121"); line_1.pack(fill="both", expand=True, padx=6, pady=2)
+#line_2 = ctk.CTkFrame(main, bg_color="#212121"); line_2.pack(fill="both", expand=True, padx=6, pady=2)
+#line_3 = ctk.CTkFrame(main, bg_color="#212121"); line_3.pack(fill="both", expand=True, padx=6, pady=2)
+bottom = ctk.CTkFrame(main, bg_color="#212121", width=DSI_WIDTH); bottom.pack(fill="x", expand=False, pady=4)
 make_futuristic_button(bottom, "Salir", root.destroy).pack(side="right", padx=10)
 def open_fan_control():
     global mode_var, manual_pwm, curve_vars, control_fan_win
@@ -938,7 +973,7 @@ def open_fan_control():
             row,
             text=f'{p["temp"]}°C',
             width=50,
-            font=("FiraMono Nerd Font", 16, "bold")
+            font=("FiraMono Nerd Font", 18, "bold")
         ).pack(side="left")
 
         var = tk.IntVar(value=p["pwm"])
@@ -947,7 +982,7 @@ def open_fan_control():
             row,
             textvariable=var,
             width=40,
-            font=("FiraMono Nerd Font", 16, "bold")
+            font=("FiraMono Nerd Font", 18, "bold")
         ).pack(side="right")
 
         scale = ctk.CTkSlider(
@@ -1026,7 +1061,7 @@ def open_fan_control():
     make_futuristic_button(actions,"Restaurar por defecto", restore_default).pack(side="left", padx=10)
     make_futuristic_button(actions, "Cerrar", lambda: control_fan_win.destroy(), width=20).pack(side="right", padx=10)
 
-make_futuristic_button(line_1, "Control Ventiladores", open_fan_control).pack(side="left", padx=10)
+#make_futuristic_button(line_1, "Control Ventiladores",font_size=18 , command=open_fan_control).pack(side="left", padx=10)
 
 
 # ---------- Ventana monitor placa ----------
@@ -1098,7 +1133,7 @@ def open_monitor_window():
     make_futuristic_button(bottom_frame, "USB", open_usb_window, width=20).pack(side="left", padx=10)
     make_futuristic_button(bottom_frame, "Cerrar", lambda: monitor_win.destroy()).pack(side="right", padx=10)
 
-make_futuristic_button(line_1, "Monitor Placa", open_monitor_window).pack(side="left", padx=10)
+#make_futuristic_button(line_1, "Monitor Placa", open_monitor_window).pack(side="left", padx=10)
     
 # -----------------------------
 # ---------- Ventana monitor de red ----------
@@ -1114,69 +1149,69 @@ def open_net_window():
         net_win.lift()
         return
 
-    net_win = tk.Toplevel(root)
+    net_win = ctk.CTkToplevel(root)
     net_win.title("Red")
-    net_win.configure(bg="#212121")
+    net_win.configure(bg_color="#212121")
     net_win.overrideredirect(True)
     net_win.geometry(f"{DSI_WIDTH}x{DSI_HEIGHT}+{DSI_X}+{DSI_Y}")
     net_win.resizable(False, False)
 
-    main_frame = tk.Frame(net_win, bg="#212121")
+    main_frame = ctk.CTkFrame(net_win, bg_color="#212121")
     main_frame.pack(fill="both", expand=True)
 
-    net_section = tk.Frame(main_frame, bg="#212121")
+    net_section = ctk.CTkFrame(main_frame, bg_color="#212121")
     net_section.pack(fill="both", expand=True, pady=5)
 
-    net_canvas = tk.Canvas(net_section, bg="#212121", highlightthickness=0)
+    net_canvas = ctk.CTkCanvas(net_section, bg="#212121", highlightthickness=0)
     net_canvas.pack(side="left", fill="both", expand=True)
-    net_scrollbar = tk.Scrollbar(net_section, orient="vertical", command=net_canvas.yview, width=30)
+    net_scrollbar = ctk.CTkScrollbar(net_section, orientation="vertical", command=net_canvas.yview, width=30)
     net_scrollbar.pack(side="right", fill="y")
-    style_scrollbar(net_scrollbar)
+    style_scrollbar_ctk(net_scrollbar)
     net_canvas.configure(yscrollcommand=net_scrollbar.set)
 
-    net_inner = tk.Frame(net_canvas, bg="#212121")
+    net_inner = ctk.CTkFrame(net_canvas, bg_color="#212121")
     net_canvas.create_window((0,0), window=net_inner, anchor="nw", width=DSI_WIDTH-35)
     net_inner.bind("<Configure>", lambda e: net_canvas.configure(scrollregion=net_canvas.bbox("all")))
 
     # --- Bloques descarga/subida ---
-    net_dl_lbl, net_dl_val, net_dl_cvs = make_block(net_inner, "DESCARGA MB/s")
+    net_dl_lbl, net_dl_val, net_dl_cvs = make_block_ctk(net_inner, "DESCARGA MB/s")
     net_dl_lines = init_graph_lines(net_dl_cvs, HISTORY, "#00ffff")
-    net_ul_lbl, net_ul_val, net_ul_cvs = make_block(net_inner, "SUBIDA MB/s")
+    net_ul_lbl, net_ul_val, net_ul_cvs = make_block_ctk(net_inner, "SUBIDA MB/s")
     net_ul_lines = init_graph_lines(net_ul_cvs, HISTORY, "#ffaa00")
     # --- Bloque speedtest ---
-    net_speed_test_lbl = tk.Label(
+    net_speed_test_lbl = ctk.CTkLabel(
         net_inner,
         text="TEST DE VELOCIDAD",
-        fg="#14611E",
-        bg="#212121",
-        font=("FiraFiraMono Nerd Font", 20, "bold")
+        text_color="#14611E",
+        bg_color="#212121",
+        font=("FiraFiraMono Nerd Font", 25, "bold")
     )
     net_speed_test_lbl.pack(anchor="w", pady=(10, 0))
 
-    net_speed_test_val = tk.Label(
+    net_speed_test_val = ctk.CTkLabel(
         net_inner,
         text="Esperando test...",
-        fg="#00ffff",
-        bg="#212121",
-        font=("FiraFiraMono Nerd Font", 18)
+        text_color="#00ffff",
+        bg_color="#212121",
+        font=("FiraFiraMono Nerd Font", 20)
     )
     net_speed_test_val.pack(anchor="w", pady=(0, 10))
     # --- Bloque de IPs ---
-    ips_frame = tk.Frame(net_inner, bg="#212121")
+    ips_frame = ctk.CTkFrame(net_inner, bg_color="#212121")
     ips_frame.pack(fill="x", pady=(0, 10))
-    tk.Label(ips_frame, text="Interfaces y IPs:", fg="#14611E", bg="#212121",
-            font=("FiraFiraMono Nerd Font", 20, "bold")).pack(anchor="w")
+    ctk.CTkLabel(ips_frame, text="Interfaces y IPs:", text_color="#14611E", bg_color="#212121", anchor="w", width=DSI_WIDTH-35,
+            font=("FiraFiraMono Nerd Font", 25, "bold")).pack(anchor="w")
 
     iface_ips = get_interfaces_ips()
     for iface, ip in iface_ips.items():
-        lbl = tk.Label(ips_frame, text=f"{iface}: {ip}", fg="#00ffff", bg="#212121",
-                       font=("FiraFiraMono Nerd Font", 18))
+        lbl = ctk.CTkLabel(ips_frame, text=f"{iface}: {ip}", text_color="#00ffff", bg_color="#212121",
+                       font=("FiraFiraMono Nerd Font", 20), anchor="w", width=DSI_WIDTH-35)
         lbl.pack(anchor="w")
         net_iface_labels[iface] = lbl
 
     # --- Sección inferior ---
 
-    bottom = tk.Frame(net_win, bg="#212121")
+    bottom = ctk.CTkFrame(net_win, bg_color="#212121")
     bottom.pack(fill="x", pady=6)
     make_futuristic_button(
         bottom,
@@ -1186,7 +1221,7 @@ def open_net_window():
 
     make_futuristic_button(bottom, "Cerrar", lambda: net_win.destroy()).pack(side="right", padx=10)
 
-make_futuristic_button(line_1, "Monitor Red", open_net_window).pack(side="left", padx=10)
+#make_futuristic_button(line_1, "Monitor Red", open_net_window).pack(side="left", padx=10)
 
 def open_usb_window():
     """
@@ -1199,26 +1234,26 @@ def open_usb_window():
         usb_win.lift()
         return
 
-    usb_win = tk.Toplevel(root)
+    usb_win = ctk.CTkToplevel(root)
     usb_win.title("Dispositivos USB")
     usb_win.configure(bg="#212121")
     usb_win.overrideredirect(True)
     usb_win.geometry(f"{DSI_WIDTH}x{DSI_HEIGHT}+{DSI_X}+{DSI_Y}")
     usb_win.resizable(False, False)
 
-    main_frame = tk.Frame(usb_win, bg="#212121")
+    main_frame = ctk.CTkFrame(usb_win, bg_color="#212121")
     main_frame.pack(fill="both", expand=True)
-    usb_section = tk.Frame(main_frame, bg="#212121")
+    usb_section = ctk.CTkFrame(main_frame, bg_color="#212121")
     usb_section.pack(fill="both", expand=True, pady=5)
     # Scrollable frame
-    usb_scroll_canvas = tk.Canvas(usb_section, bg="#212121", highlightthickness=0)
+    usb_scroll_canvas = ctk.CTkCanvas(usb_section, bg="#212121", highlightthickness=0)
     usb_scroll_canvas.pack(side="left", fill="both", expand=True)
-    usb_scrollbar = tk.Scrollbar(usb_section, orient="vertical", command=usb_scroll_canvas.yview, width=30)
+    usb_scrollbar = ctk.CTkScrollbar(usb_section, orientation="vertical", command=usb_scroll_canvas.yview, width=30)
     usb_scrollbar.pack(side="right", fill="y")
-    style_scrollbar(usb_scrollbar)
+    style_scrollbar_ctk(usb_scrollbar)
     usb_scroll_canvas.configure(yscrollcommand=usb_scrollbar.set)
 
-    usb_inner_frame = tk.Frame(usb_scroll_canvas, bg="#212121")
+    usb_inner_frame = ctk.CTkFrame(usb_scroll_canvas, bg_color="#212121")
     usb_scroll_canvas.create_window((0,0), window=usb_inner_frame, anchor="nw", width=DSI_WIDTH-35)
     usb_inner_frame.bind("<Configure>", lambda e: usb_scroll_canvas.configure(scrollregion=usb_scroll_canvas.bbox("all")))
 
@@ -1228,7 +1263,7 @@ def open_usb_window():
     usb_devices_buttons.clear()
 
     # Botón cerrar siempre abajo
-    bottom_frame = tk.Frame(main_frame, bg="#212121")
+    bottom_frame = ctk.CTkFrame(main_frame, bg_color="#212121")
     bottom_frame.pack(fill="x", pady=6, padx=8)
     make_futuristic_button(bottom_frame, "Cerrar", usb_win.destroy).pack(side="right", padx=10)
     refresh_btn = make_futuristic_button(
@@ -1239,7 +1274,7 @@ def open_usb_window():
     # Carga inicial
     refresh_usb_devices()
 
-make_futuristic_button(line_2, "Monitor USB", open_usb_window).pack(side="left", padx=10)
+#make_futuristic_button(line_2, "Monitor USB", open_usb_window).pack(side="left", padx=10)
 
 def run_script(script_path):
     def _run():
@@ -1270,32 +1305,33 @@ def open_lanzadores():
         lanzadores_win.lift()
         return
 
-    lanzadores_win = tk.Toplevel(root)
+    lanzadores_win = ctk.CTkToplevel(root)
     lanzadores_win.title("Lanzadores")
     lanzadores_win.configure(bg="#212121")
     lanzadores_win.overrideredirect(True)
     lanzadores_win.geometry(f"{DSI_WIDTH}x{DSI_HEIGHT}+{DSI_X}+{DSI_Y}")
     lanzadores_win.resizable(False, False)
 
-    main = tk.Frame(lanzadores_win, bg="#212121")
+    main = ctk.CTkFrame(lanzadores_win, bg_color="#212121")
     main.pack(fill="both", expand=True, padx=5, pady=5)
-    title = tk.Label(
+    title = ctk.CTkLabel(
         main,
         text="LANZADORES",
-        fg="#14611E",
-        bg="#212121",
-        font=("FiraFiraMono Nerd Font", 24, "bold")
+        text_color="#14611E",
+        bg_color="#212121",
+        font=("FiraFiraMono Nerd Font", 24, "bold"),
+        anchor="w"
     )
     title.pack(anchor="w", pady=(0, 20))
-    top = tk.Frame(main, bg="#212121")
+    top = ctk.CTkFrame(main, bg_color="#212121")
     top.pack(fill="both", expand=True, pady=5)
-    lanzadore_canvas = tk.Canvas(top, bg="#212121", highlightthickness=0)
+    lanzadore_canvas = ctk.CTkCanvas(top, bg="#212121", highlightthickness=0)
     lanzadore_canvas.pack(side="left", fill="both", expand=True)
-    lanzadores_scrollbar = tk.Scrollbar(top, orient="vertical", command=lanzadore_canvas.yview, width=30)
+    lanzadores_scrollbar = ctk.CTkScrollbar(top, orientation="vertical", command=lanzadore_canvas.yview, width=30)
     lanzadores_scrollbar.pack(side="right", fill="y")
-    style_scrollbar(lanzadores_scrollbar)
+    style_scrollbar_ctk(lanzadores_scrollbar)
     lanzadore_canvas.configure(yscrollcommand=lanzadores_scrollbar.set)
-    lanzadores_inner = tk.Frame(lanzadore_canvas, bg="#212121")
+    lanzadores_inner = ctk.CTkFrame(lanzadore_canvas, bg_color="#212121")
     lanzadore_canvas.create_window((0,0), window=lanzadores_inner, anchor="nw", width=DSI_WIDTH-35)
     lanzadores_inner.bind("<Configure>", lambda e: lanzadore_canvas.configure(scrollregion=lanzadore_canvas.bbox("all")))
 
@@ -1312,7 +1348,7 @@ def open_lanzadores():
         btn.pack(anchor="center", pady=6)
 
     # --- Cerrar ---
-    bottom = tk.Frame(main, bg="#212121")
+    bottom = ctk.CTkFrame(main, bg_color="#212121")
     bottom.pack(side="bottom", fill="x", pady=10)
 
     make_futuristic_button(
@@ -1321,7 +1357,36 @@ def open_lanzadores():
         lanzadores_win.destroy
     ).pack(side="right")
 
-make_futuristic_button(line_2, "Lanzadores", open_lanzadores).pack(side="left", padx=10)
+#make_futuristic_button(line_2, "Lanzadores", open_lanzadores).pack(side="left", padx=10)
+def prueba():
+    pass
+botones_menu = [
+    ("Control Ventiladores", open_fan_control),
+    ("Monitor Placa", open_monitor_window),
+    ("Monitor Red", open_net_window),
+    ("Monitor USB", open_usb_window),
+    ("Lanzadores", open_lanzadores),
+]
+
+columnas = 2  # cuantos botones por fila quieres
+
+for i, (texto, comando) in enumerate(botones_menu):
+    fila = i // columnas
+    columna = i % columnas
+
+    btn = make_futuristic_button(
+        menu_inner,
+        texto,
+        command=comando,
+        font_size=20,
+        width=30,
+        height=15
+    )
+
+    btn.grid(row=fila, column=columna, padx=10, pady=10, sticky="nsew")
+    
+for c in range(columnas):
+    menu_inner.grid_columnconfigure(c, weight=1)
 
 # -----------------------------
 # ---------- Update loop ----------
@@ -1427,10 +1492,10 @@ def update():
         update_graph_lines(net_dl_cvs, net_dl_lines, net_download_hist, net_dynamic_max)
         update_graph_lines(net_ul_cvs, net_ul_lines, net_upload_hist, net_dynamic_max)
 
-        net_dl_lbl.config(text=f"DESCARGA MB/s ({iface})", fg=net_color(dl))
-        net_ul_lbl.config(text=f"SUBIDA MB/s ({iface})", fg=net_color(ul))
-        net_dl_val.config(text=f"{dl:.2f} MB/s | Escala: {net_dynamic_max:.2f}", fg=net_color(dl))
-        net_ul_val.config(text=f"{ul:.2f} MB/s | Escala: {net_dynamic_max:.2f}", fg=net_color(ul))
+        net_dl_lbl.configure(text=f"DESCARGA MB/s ({iface})", text_color=net_color(dl))
+        net_ul_lbl.configure(text=f"SUBIDA MB/s ({iface})", text_color=net_color(ul))
+        net_dl_val.configure(text=f"{dl:.2f} MB/s | Escala: {net_dynamic_max:.2f}", text_color=net_color(dl))
+        net_ul_val.configure(text=f"{ul:.2f} MB/s | Escala: {net_dynamic_max:.2f}", text_color=net_color(ul))
         if (
             net_win and net_win.winfo_exists()
             and net_speed_test_val is not None
@@ -1438,37 +1503,37 @@ def update():
             st = speedtest_result["status"]
 
             if st == "idle":
-                net_speed_test_val.config(
+                net_speed_test_val.configure(
                     text="Esperando test...",
-                    fg="#00ffff"
+                    text_color="#00ffff"
                 )
 
             elif st == "running":
-                net_speed_test_val.config(
+                net_speed_test_val.configure(
                     text="Ejecutando test...",
-                    fg="#ffaa00"
+                    text_color="#ffaa00"
                 )
 
             elif st == "done":
-                net_speed_test_val.config(
+                net_speed_test_val.configure(
                     text=(
                         f"Ping: {speedtest_result['ping']} ms\n"
                         f"↓ {speedtest_result['download']} MB/s\n"
                         f"↑ {speedtest_result['upload']} MB/s"
                     ),
-                    fg="#00ffff"
+                    text_color="#00ffff"
                 )
 
             elif st == "timeout":
-                net_speed_test_val.config(
+                net_speed_test_val.configure(
                     text="Timeout en el test",
-                    fg="#ff3333"
+                    text_color="#ff3333"
                 )
 
             elif st == "error":
-                net_speed_test_val.config(
+                net_speed_test_val.configure(
                     text="Error ejecutando test",
-                    fg="#ff3333"
+                    text_color="#ff3333"
                 )
 
 
