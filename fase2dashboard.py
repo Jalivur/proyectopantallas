@@ -1421,7 +1421,7 @@ def update():
             desired = int(current_target) if isinstance(current_target,int) else int(manual_pwm.get())
         elif mode=="auto":
             desired = compute_pwm_from_curve(temp)
-        elif mode=="silent": desired=30
+        elif mode=="silent": desired=77
         elif mode=="normal": desired=128
         elif mode=="performance": desired=255
         else: desired = compute_pwm_from_curve(temp)
