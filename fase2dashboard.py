@@ -107,7 +107,7 @@ def make_futuristic_button(parent, text, command=None, width=None, height=None, 
 def style_slider(slider, color="#00ffff"):
     slider.config(troughcolor="#14611E", sliderrelief="flat", bd=0,
                   highlightthickness=0, fg=color, bg="#111111", activebackground=color)
-def style_slider_ctk(slider, color="#00ffff"):
+def style_slider_ctk(slider, color="#10c5c5"):
     slider.configure(
         fg_color="#14611E",          # fondo del rail
         progress_color=color,        # parte activa
@@ -121,7 +121,7 @@ def style_scrollbar(sb, color="#111111"):
               highlightthickness=0, relief="flat")
 def style_scrollbar_ctk(sb, color="#111111"):
     sb.configure(
-        bg_color="#14611E",
+        bg_color="#10c5c5",
         button_color=color,
         button_hover_color="#595959"
         
