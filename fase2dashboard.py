@@ -64,6 +64,14 @@ LAUNCHERS = [
     {
         "label": "Shutdown",
         "script": "/home/jalivur/Documents/apagado.sh"
+    },
+    {
+        "label": "Conectar VPN",
+        "script":"/home/jalivur/Documents/conectar_vpn.sh"
+    },
+    {
+        "label":"Desconectar VPN",
+        "script":"/home/jalivur/Documents/desconectar_vpn.sh"
     }
 ]
 
@@ -683,6 +691,51 @@ def eject_usb_device_with_popup(dev):
             title="Error"
         )
 
+def custom_confirm(parent, text, title="Confirmación"):
+    """
+    Muestra un mensaje con OK y Cancelar y devuelve True si OK, False si Cancelar
+    """
+    result = {"value": False}  # Usamos dict para que se pueda modificar desde el callback
+
+    popup = ctk.CTkToplevel(parent)
+    popup.overrideredirect(True)
+    popup.configure(bg_color="#212121")
+
+    frame = ctk.CTkFrame(popup, bg_color="#212121")
+    frame.pack(fill="both", expand=True, padx=20, pady=20)
+
+    title_lbl = ctk.CTkLabel(frame, text=title, text_color="#00ffff", font=("FiraMono Nerd Font", 24, "bold"))
+    title_lbl.pack(pady=(0,10))
+
+    text_lbl = ctk.CTkLabel(frame, text=text, text_color="white", font=("FiraMono Nerd Font", 22), wraplength=400)
+    text_lbl.pack(pady=(0,15))
+
+    def on_ok():
+        result["value"] = True
+        popup.destroy()
+
+    def on_cancel():
+        result["value"] = False
+        popup.destroy()
+
+    btn_frame = ctk.CTkFrame(frame, bg_color="#212121")
+    btn_frame.pack(pady=(10,0))
+
+    make_futuristic_button(btn_frame, "OK", on_ok, width=20, height=10).pack(side="left", padx=10)
+    make_futuristic_button(btn_frame, "Cancelar", on_cancel, width=20, height=10).pack(side="right", padx=10)
+
+    # Forzar cálculo de tamaño y centrar sobre parent
+    popup.update_idletasks()
+    w, h = popup.winfo_reqwidth(), popup.winfo_reqheight()
+    x = parent.winfo_x() + (parent.winfo_width()//2) - (w//2)
+    y = parent.winfo_y() + (parent.winfo_height()//2) - (h//2)
+    popup.geometry(f"{w}x{h}+{x}+{y}")
+
+    popup.lift()
+    popup.focus_force()
+    popup.grab_set()
+    popup.wait_window()  # Espera a que se cierre el popup
+    return result["value"]
 
 
 # -----------------------------
@@ -1138,6 +1191,18 @@ def open_monitor_window():
 # -----------------------------
 # ---------- Ventana monitor de red ----------
 # -----------------------------
+def refresh_ips():
+    # Primero, eliminar los labels existentes
+    for lbl in net_iface_labels.values():
+        lbl.destroy()
+    net_iface_labels.clear()  # Limpiamos el diccionario
+    iface_ips = get_interfaces_ips()
+    for iface, ip in iface_ips.items():
+        lbl = ctk.CTkLabel(ips_frame, text=f"{iface}: {ip}", text_color="#00ffff", bg_color="#212121",
+                       font=("FiraFiraMono Nerd Font", 20), anchor="w", width=DSI_WIDTH-35)
+        lbl.pack(anchor="w")
+        net_iface_labels[iface] = lbl
+
 def open_net_window():
     global net_win
     global net_dl_lbl, net_dl_val, net_dl_cvs
@@ -1218,6 +1283,11 @@ def open_net_window():
         "Test velocidad",
         start_speedtest,
     ).pack(side="left", padx=10)
+    make_futuristic_button(
+        bottom,
+        "Actualizar",
+        refresh_ips,
+    ).pack(side="left", padx=10, pady=10)
 
     make_futuristic_button(bottom, "Cerrar", lambda: net_win.destroy()).pack(side="right", padx=10)
 
@@ -1335,18 +1405,26 @@ def open_lanzadores():
     lanzadore_canvas.create_window((0,0), window=lanzadores_inner, anchor="nw", width=DSI_WIDTH-35)
     lanzadores_inner.bind("<Configure>", lambda e: lanzadore_canvas.configure(scrollregion=lanzadore_canvas.bbox("all")))
 
-
+    columnas=2
     # --- Botones ---
-    for launcher in LAUNCHERS:
+    for i, launcher in enumerate(LAUNCHERS):
+        texto=launcher["label"]
+        script=launcher["script"]
+        fila = i//columnas
+        columna = i % columnas
         btn = make_futuristic_button(
             lanzadores_inner,
-            launcher["label"],
-            command=lambda s=launcher["script"]: run_script(s),
-            width=80,
-            font_size=30
+            text=texto,
+            command=lambda s=script, l=texto: run_script(s) if custom_confirm(root, f"¿Seguro que quieres ejecutar {l}?") else None,
+            width=30,
+            height=15,
+            font_size=30,
         )
-        btn.pack(anchor="center", pady=6)
+        btn.grid(row=fila, column=columna, padx=10, pady=10, sticky="nsew")
+    for c in range(columnas):
+        lanzadores_inner.grid_columnconfigure(c, weight=1)
 
+    
     # --- Cerrar ---
     bottom = ctk.CTkFrame(main, bg_color="#212121")
     bottom.pack(side="bottom", fill="x", pady=10)
@@ -1358,8 +1436,6 @@ def open_lanzadores():
     ).pack(side="right")
 
 #make_futuristic_button(line_2, "Lanzadores", open_lanzadores).pack(side="left", padx=10)
-def prueba():
-    pass
 botones_menu = [
     ("Control Ventiladores", open_fan_control),
     ("Monitor Placa", open_monitor_window),

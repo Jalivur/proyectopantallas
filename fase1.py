@@ -83,7 +83,13 @@ def get_ip():
             return ip_output[0]
         time.sleep(1)
     return "No IP"
-
+def get_ip_of_interface(iface_name="tun0"):
+    addrs = psutil.net_if_addrs()
+    if iface_name in addrs:
+        for addr in addrs[iface_name]:
+            if addr.family.name == "AF_INET":  # IPv4
+                return addr.address
+    return "No IP"
 
 last_state = {
     "cpu": None,
@@ -96,12 +102,13 @@ last_state = {
 }
 
 
-def draw_oled_smart(cpu, ram, temp, ip):
+def draw_oled_smart(cpu, ram, temp, ip, tun_ip):
     changed = (
         round(cpu, 1) != last_state["cpu"] or
         round(ram, 1) != last_state["ram"] or
         int(temp) != last_state["temp"] or
         ip != last_state["ip"] or
+        tun_ip != last_state["tun_ip"]or
         fan0_duty != last_state["fan0_duty"] or
         fan1_duty != last_state["fan1_duty"]
     )
@@ -114,13 +121,17 @@ def draw_oled_smart(cpu, ram, temp, ip):
     oled.draw_text(f"RAM: {ram:>5.1f} %", (0, 12))
     oled.draw_text(f"TEMP:{temp:>5.1f} C", (0, 24))
     oled.draw_text(f"IP: {ip}", (0, 36))
-    oled.draw_text(f"Fan1:{fan0_duty}%/ Fan2:{fan1_duty}%", (0, 48))
+    if tun_ip!= "No IP":
+        oled.draw_text(f"IP Tun: {tun_ip}", (0, 48))
+    else:
+        oled.draw_text(f"Fan1:{fan0_duty}%/ Fan2:{fan1_duty}%", (0, 48))
     oled.show()
 
     last_state["cpu"] = round(cpu, 1)
     last_state["ram"] = round(ram, 1)
     last_state["temp"] = int(temp)
     last_state["ip"] = ip
+    last_state["tun_ip"] = tun_ip
     last_state["fan0_duty"] = fan0_duty
     last_state["fan1_duty"] = fan1_duty
 
@@ -150,11 +161,13 @@ try:
         
         now = time.time()
 
-        if now - last_ip_time > 30:   # cada 30 segundos
+        if now - last_ip_time > 20:   # cada 20 segundos
             last_ip = get_ip()
+            last_tun_ip = get_ip_of_interface("tun0") # IP del túnel
             last_ip_time = now
 
         ip = last_ip
+        tun_ip = last_tun_ip
 
 
         now = time.time()
@@ -201,7 +214,7 @@ try:
         current_color = smooth(current_color, target_color)
         board.set_all_led_color(*current_color)
 
-        draw_oled_smart(cpu, ram, temp, ip)
+        draw_oled_smart(cpu, ram, temp, ip, tun_ip)
 
         time.sleep(0.5)
 
