@@ -96,6 +96,7 @@ last_state = {
     "ram": None,
     "temp": None,
     "ip": None,
+    "tun_ip": None,
     "fan0_duty": None,
     "fan1_duty": None
     
