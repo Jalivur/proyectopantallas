@@ -14,6 +14,11 @@ from config.settings import *
 from services.state_service import StateService
 from core.curve_logic import CurveLogic
 from core.system_metrics import SystemMetrics
+from services.usb_service import UsbService
+from services.network_service import NetworkService
+from core.network_metrics import NetworkMetrics
+
+
 
 DSI_X = 1920 - DSI_WIDTH
 DSI_Y = 1080 - DSI_HEIGHT
@@ -24,12 +29,6 @@ DSI_Y = 1080 - DSI_HEIGHT
 WIDTH = 800
 HEIGHT = 20
 
-NET_INTERFACE = None   # None = auto | "eth0" | "wlan0"
-NET_MAX_MB = 10.0   # eje fijo en MB/s
-NET_MIN_SCALE = 0.5
-NET_MAX_SCALE = 200.0   # límite de seguridad
-NET_IDLE_THRESHOLD = 0.2
-NET_IDLE_RESET_TIME = 15   # segundos
 
 # -----------------------------
 # ---------- Helper style ----------
@@ -162,7 +161,9 @@ def custom_msgbox(parent, text, title="Info"):
 state_service = StateService()
 curve_logic = CurveLogic()
 system_metrics = SystemMetrics()
-
+network_service = NetworkService()
+network_metrics = NetworkMetrics()
+usb_service = UsbService()
 # -----------------------------
 # ---------- Graph helpers ----------
 # -----------------------------
@@ -429,82 +430,6 @@ def start_speedtest():
     t = threading.Thread(target=run_speedtest, daemon=True)
     t.start()
 
-def list_all_usb_devices():
-    """
-    Retorna dos listas de dispositivos USB:
-    1. almacenamiento: discos/particiones USB con mountpoint
-    2. otros: cualquier otro USB (teclados, ratones, cámaras, hubs, etc.)
-    Cada dispositivo es un dict con keys: 'name', 'type', 'mount', 'dev', 'size'
-    """
-    storage_devices = []
-    other_devices = []
-
-    # --- Discos USB ---
-    try:
-        out = subprocess.check_output(
-            ["lsblk", "-o", "NAME,MODEL,TRAN,MOUNTPOINT,SIZE,TYPE", "-J"], text=True
-        )
-        blk = json.loads(out)
-        for block in blk.get("blockdevices", []):
-            if block.get("tran") == "usb":
-                # Guardar disco padre
-                dev = {
-                    "name": block.get("model", "USB Disk"),
-                    "type": block.get("type", "disk"),
-                    "mount": block.get("mountpoint"),
-                    "dev": "/dev/" + block.get("name"),
-                    "size": block.get("size"),
-                    "children": []
-                }
-
-                # Guardar particiones como hijos
-                for child in block.get("children", []):
-                    child_dev = {
-                        "name": child.get("model") or child.get("name"),
-                        "type": child.get("type"),
-                        "mount": child.get("mountpoint"),
-                        "dev": "/dev/" + child.get("name"),
-                        "size": child.get("size")
-                    }
-                    dev["children"].append(child_dev)
-
-                storage_devices.append(dev)
-
-    except Exception:
-        pass
-
-    # --- Otros dispositivos USB ---
-    try:
-        out = subprocess.check_output(["lsusb"], text=True)
-        
-        for line in out.strip().split("\n"):
-            if line:
-                other_devices.append({"name": line, "type": "usb", "mount": None, "dev": None, "size": None})
-    except Exception:
-        other_devices.append({"name": "Error listando USBs", "type": "error", "mount": None, "dev": None, "size": None})
-
-    return storage_devices, other_devices
-
-def parse_lsusb_line(line):
-    """
-    Convierte una línea de lsusb en algo más legible:
-    'Bus 004 Device 002: ID 0b05:17eb ASUSTek Computer, Inc. USB-AC55 ...'
-    → 'Bus 004 - ASUSTek Computer, Inc.: USB-AC55 ...'
-    """
-    parts = line.split()
-    try:
-        # Extraer número de bus
-        bus_index = parts.index("Bus") + 1
-        bus = parts[bus_index]
-
-        # Buscar el primer elemento después del ID XXXX:YYYY
-        id_index = parts.index("ID") + 2
-        manufacturer = parts[id_index]
-        model = " ".join(parts[id_index+1:])
-
-        return f"Bus {bus} - {manufacturer}: {model}"
-    except Exception:
-        return line  # fallback si no se puede parsear
 
 
 last_storage_devices = set()  # global
@@ -518,7 +443,7 @@ def refresh_usb_devices():
     if not usb_win or not usb_win.winfo_exists():
         return
 
-    storage, others = list_all_usb_devices()
+    storage, others = usb_service.list_all_usb_devices()
 
     # Limpiar widgets antiguos (excepto botón refrescar)
     for key, lbl in list(usb_devices_labels.items()):
@@ -587,7 +512,7 @@ def refresh_usb_devices():
         usb_devices_labels["others_title"] = lbl_title
 
         for idx, dev in enumerate(others):
-            text = parse_lsusb_line(dev['name'])
+            text = usb_service.parse_lsusb_line(dev['name'])
             lbl = ctk.CTkLabel(usb_inner_frame, text=text, text_color="#00ffff", bg_color="#212121",
                         font=("FiraMono Nerd Font", 18), anchor="w", justify="left", wraplength=DSI_WIDTH-60)
             lbl.pack(anchor="w", pady=1)
@@ -1499,22 +1424,28 @@ def update():
         disk_temp_lvl.configure(text_color=disk_temp_c)
         disk_temp_val.configure(text=f"{disk_temp_celsius} °C", text_color=disk_temp_c)
     if net_win and net_win.winfo_exists():
-        iface, stats = get_net_io(NET_INTERFACE)
+        net_data = network_service.get_network_delta()
 
-        prev = last_net_io.get(iface)
-        dl, ul = safe_net_speed(stats, prev)
+        dl = network_metrics.compute_speed(
+            net_data["download_bytes"],
+            net_data["delta_time"]
+        )
 
-        last_net_io[iface] = stats
-        last_used_iface = iface
+        ul = network_metrics.compute_speed(
+            net_data["upload_bytes"],
+            net_data["delta_time"]
+        )
 
         net_download_hist.append(dl)
         net_upload_hist.append(ul)
 
-        net_dynamic_max = adaptive_scale(
-            net_dynamic_max,
-            list(net_download_hist) + list(net_upload_hist)
+        net_dynamic_max = network_metrics.update_dynamic_scale(
+            max(dl, ul)
         )
 
+        iface = net_data["iface"]
+
+    
         recolor_lines(net_dl_cvs, net_dl_lines, net_color(dl))
         recolor_lines(net_ul_cvs, net_ul_lines, net_color(ul))
         update_graph_lines(net_dl_cvs, net_dl_lines, net_download_hist, net_dynamic_max)

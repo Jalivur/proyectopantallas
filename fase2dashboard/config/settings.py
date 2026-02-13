@@ -28,6 +28,13 @@ RAM_CRIT  = 85
 NET_WARN  = 2.0
 NET_CRIT  = 6.0
 
+NET_INTERFACE = None   # None = auto | "eth0" | "wlan0"
+NET_MAX_MB = 10.0   # eje fijo en MB/s
+NET_MIN_SCALE = 0.5
+NET_MAX_SCALE = 200.0   # límite de seguridad
+NET_IDLE_THRESHOLD = 0.2
+NET_IDLE_RESET_TIME = 15   # segundos
+
 
 DISK_MIN_SCALE = 0.1
 DISK_MAX_SCALE = 10000 # MB/s límite superior
