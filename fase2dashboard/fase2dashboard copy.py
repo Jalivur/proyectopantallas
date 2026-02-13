@@ -1,0 +1,1574 @@
+import tkinter as tk
+import customtkinter as ctk
+import psutil
+import subprocess
+from collections import deque
+import json
+import os
+import socket
+import logging
+import threading
+import re
+from functools import partial
+from config.settings import *
+from services.state_service import StateService
+from core.curve_logic import CurveLogic
+from core.system_metrics import SystemMetrics
+
+DSI_X = 1920 - DSI_WIDTH
+DSI_Y = 1080 - DSI_HEIGHT
+
+# -----------------------------
+# ---------- Config ----------
+# -----------------------------
+WIDTH = 800
+HEIGHT = 20
+
+NET_INTERFACE = None   # None = auto | "eth0" | "wlan0"
+NET_MAX_MB = 10.0   # eje fijo en MB/s
+NET_MIN_SCALE = 0.5
+NET_MAX_SCALE = 200.0   # límite de seguridad
+NET_IDLE_THRESHOLD = 0.2
+NET_IDLE_RESET_TIME = 15   # segundos
+
+# -----------------------------
+# ---------- Helper style ----------
+# -----------------------------
+def style_radiobutton_tk(rb, fg="#00ffff", bg="#111111", hover_fg="#1ae313"):
+    rb.config(fg=fg, bg=bg, selectcolor=bg, activeforeground=fg, activebackground=bg,
+              font=("FiraMono Nerd Font", 14, "bold"), indicatoron=True)
+    def on_enter(e): rb.config(fg=hover_fg)
+    def on_leave(e): rb.config(fg=fg)
+    rb.bind("<Enter>", on_enter)
+    rb.bind("<Leave>", on_leave)
+    
+def style_radiobutton_ctk(rb):
+    rb.configure(
+            radiobutton_width=25,
+            radiobutton_height=25,
+            font=("FiraMono Nerd Font", 18, "bold"),
+            fg_color="#00ffff",
+    )
+    
+def make_futuristic_button(parent, text, command=None, width=None, height=None, font_size=None):
+    if width is None:
+        width = 20
+    if height is None:
+        height = 10
+    if font_size is None:
+        font_size = 20
+    btn = ctk.CTkButton(parent, text=text, command=command,
+                    fg_color="#111111", hover_color="#222222",
+                    border_width=3, border_color="#00ffff",
+                    width=width*8, height=height*8,
+                    font=("FiraMono Nerd Font", font_size, "bold"), corner_radius=10)
+    def on_enter(e): btn.configure(fg_color="#222222")
+    def on_leave(e): btn.configure(fg_color="#111111")
+    btn.bind("<Enter>", on_enter)
+    btn.bind("<Leave>", on_leave)
+    return btn
+
+def style_slider(slider, color="#00ffff"):
+    slider.config(troughcolor="#14611E", sliderrelief="flat", bd=0,
+                  highlightthickness=0, fg=color, bg="#111111", activebackground=color)
+def style_slider_ctk(slider, color="#10c5c5"):
+    slider.configure(
+        fg_color="#14611E",          # fondo del rail
+        progress_color=color,        # parte activa
+        button_color=color,          # botón
+        button_hover_color=color,
+        height=30
+    )
+
+def style_scrollbar(sb, color="#111111"):
+    sb.config(troughcolor="#14611E", bg=color, activebackground=color,
+              highlightthickness=0, relief="flat")
+def style_scrollbar_ctk(sb, color="#111111"):
+    sb.configure(
+        bg_color="#10c5c5",
+        button_color=color,
+        button_hover_color="#595959"
+        
+    )
+
+def style_ctk_scrollbar(scrollable_frame, color="#14611E"):
+    scrollable_frame.configure(
+        scrollbar_fg_color=color,
+        scrollbar_button_color="#111111",
+        scrollbar_button_hover_color="#595757"
+    )
+
+
+def custom_msgbox(parent, text, title="Info"):
+    popup = ctk.CTkToplevel(parent)
+    popup.overrideredirect(True)
+    popup.configure()
+
+    # --- Contenedor ---
+    frame = ctk.CTkFrame(popup)
+    frame.pack(fill="both", expand=True)
+
+    title_lbl = ctk.CTkLabel(
+        frame, text=title,
+        text_color="#00ffff",
+        font=("FiraMono Nerd Font", 20, "bold")
+    )
+    title_lbl.pack(anchor="center", pady=(0, 10))
+
+    text_lbl = ctk.CTkLabel(
+        frame, text=text,
+        text_color="#ffffff",
+        font=("FiraMono Nerd Font", 18),
+        compound="left",
+        wraplength=800   # límite lógico, no tamaño final
+    )
+    text_lbl.pack(anchor="center", pady=(0, 15))
+
+    btn = make_futuristic_button(
+        frame, text="OK",
+        command=popup.destroy,
+        width=15, height=6, font_size=16
+    )
+    btn.pack()
+
+    # --- Forzar cálculo de tamaño ---
+    popup.update_idletasks()
+
+    # --- Tamaño requerido ---
+    w = popup.winfo_reqwidth()
+    h = popup.winfo_reqheight()
+
+    # --- Tamaño máximo de pantalla ---
+    max_w = parent.winfo_screenwidth() - 40
+    max_h = parent.winfo_screenheight() - 40
+
+    w = min(w, max_w)
+    h = min(h, max_h)
+
+    # --- Centrar sobre la ventana padre ---
+    x = parent.winfo_x() + (parent.winfo_width() // 2) - (w // 2)
+    y = parent.winfo_y() + (parent.winfo_height() // 2) - (h // 2)
+
+    popup.geometry(f"{w}x{h}+{x}+{y}")
+
+    popup.lift()
+    popup.focus_force()
+    popup.grab_set()
+
+
+# -----------------------------
+# ---------- llamadas a modulos ----------
+# -----------------------------
+state_service = StateService()
+curve_logic = CurveLogic()
+system_metrics = SystemMetrics()
+
+# -----------------------------
+# ---------- Graph helpers ----------
+# -----------------------------
+def draw_graph(canvas, data, max_val, color, y_offset=0):
+    step = WIDTH / (len(data) - 1)
+    pts = []
+    for i, v in enumerate(data):
+        x = i * step
+        y = HEIGHT - (v / max_val) * HEIGHT + y_offset
+        pts.append((x, y))
+    for i in range(len(pts) - 1):
+        canvas.create_line(
+            *pts[i], *pts[i+1],
+            fill=color,
+            width=2
+        )
+
+def init_graph_lines(canvas, history_len, color, width=2):
+    lines = []
+    for _ in range(history_len - 1):
+        lid = canvas.create_line(0, 0, 0, 0, fill=color, width=width)
+        lines.append(lid)
+    return lines
+
+def update_graph_lines(canvas, lines, data, max_val, y_offset=0):
+    if not lines:
+        return
+    step = WIDTH / (len(data) - 1)
+    for i in range(len(lines)):
+        v1 = data[i]
+        v2 = data[i + 1]
+
+        x1 = i * step
+        x2 = (i + 1) * step
+
+        y1 = HEIGHT - (v1 / max_val) * HEIGHT + y_offset
+        y2 = HEIGHT - (v2 / max_val) * HEIGHT + y_offset
+
+        canvas.coords(lines[i], x1, y1, x2, y2)
+        
+def recolor_lines(canvas, lines, color):
+    for lid in lines:
+        canvas.itemconfig(lid, fill=color)
+
+def level_color(v,w,c):
+    if v<w: return "#00ff00"
+    if v<c: return "#ffaa00"
+    return "#ff3333"
+
+def net_color(v):
+    if v < NET_WARN:
+        return "#ec0909"
+    if v < NET_CRIT:
+        return "#ffaa00"
+    return "#52f828"
+
+def smooth(data, n=5):
+    if len(data) < n:
+        return data
+    out = []
+    for i in range(len(data)):
+        start = max(0, i - n + 1)
+        out.append(sum(data[start:i+1]) / (i - start + 1))
+    return out
+
+def make_block(parent,title):
+    lbl=tk.Label(parent,text=title,fg="white",bg="#212121",font=("FiraMono Nerd Font",22))
+    lbl.pack(anchor="w")
+    val=tk.Label(parent,fg="white",bg="#212121",font=("FiraMono Nerd Font",26,"bold"))
+    val.pack(anchor="e")
+    cvs=tk.Canvas(parent,width=WIDTH,height=HEIGHT,bg="#212121",highlightthickness=0)
+    cvs.pack()
+    return lbl,val,cvs
+
+def make_block_ctk(parent,title):
+    lbl=ctk.CTkLabel(parent,text=title, text_color="white",font=("FiraMono Nerd Font",22))
+    lbl.pack(anchor="w")
+    val=ctk.CTkLabel(parent,text_color="white",font=("FiraMono Nerd Font",26,"bold"))
+    val.pack(anchor="e")
+    cvs=ctk.CTkCanvas(parent,width=WIDTH,height=HEIGHT,bg="#212121",highlightthickness=0)
+    cvs.pack()
+    return lbl,val,cvs
+# -----------------------------
+# ---------- Network helpers ----------
+# -----------------------------
+def get_net_io(interface=None):
+    """
+    Retorna la interfaz usada y sus stats.
+    Evita picos absurdos y mantiene el historial correcto.
+    """
+    global last_net_pernic
+
+    stats = psutil.net_io_counters(pernic=True)
+
+    if interface and interface in stats:
+        last_net_pernic = stats
+        return interface, stats[interface]
+
+    best_name = None
+    best_speed = -1
+
+    for name in stats:
+        if name not in last_net_pernic:
+            continue
+
+        curr = stats[name]
+        prev = last_net_pernic[name]
+
+        speed = (
+            (curr.bytes_recv - prev.bytes_recv) +
+            (curr.bytes_sent - prev.bytes_sent)
+        )
+
+        # --- Evitar picos absurdos ---
+        if speed < 0 or speed > 500*1024*1024:  # 500 MB en intervalo
+            continue
+
+        if speed > best_speed:
+            best_speed = speed
+            best_name = name
+
+    last_net_pernic = stats
+
+    if best_name:
+        return best_name, stats[best_name]
+
+    # fallback
+    name = next(iter(stats))
+    return name, stats[name]
+
+def safe_net_speed(curr, prev):
+    if not prev:
+        return 0.0, 0.0
+
+    dl = curr.bytes_recv - prev.bytes_recv
+    ul = curr.bytes_sent - prev.bytes_sent
+
+    # --- Si el contador bajó → reset ---
+    if dl < 0 or ul < 0:
+        return 0.0, 0.0
+
+    # convertir a MB/s
+    dl = dl / 1024 / 1024
+    ul = ul / 1024 / 1024
+
+    # --- Filtro de picos absurdos ---
+    if dl > 500 or ul > 500:
+        return 0.0, 0.0
+
+    return dl, ul
+
+def adaptive_scale(current_max, data):
+    """
+    Ajusta escala dinámica, sube rápido con tráfico real,
+    baja progresivamente y se reinicia si hay inactividad.
+    """
+    global net_idle_counter
+
+    if not data:
+        return current_max * 0.5
+
+    peak = max(data)
+
+    # --- Subir rápido si hay tráfico real ---
+    if peak > current_max:
+        net_idle_counter = 0
+        return min(peak * 1.2, NET_MAX_SCALE)
+
+    # --- Detectar tráfico bajo ---
+    if peak < NET_IDLE_THRESHOLD:
+        net_idle_counter += 1
+    else:
+        net_idle_counter = 0
+
+    # --- Reset si lleva tiempo sin tráfico ---
+    if net_idle_counter > NET_IDLE_RESET_TIME:
+        return NET_MIN_SCALE
+
+    # --- Decaimiento progresivo ---
+    new_val = current_max * 0.90
+    return max(new_val, NET_MIN_SCALE)
+
+
+
+def adaptive_disk_scale(current_max, data):
+    global disk_idle_counter
+    if not data:
+        return max(current_max*0.5, DISK_MIN_SCALE)
+
+    peak = max(data)
+
+    # Subir rápido si hay tráfico real
+    if peak > current_max:
+        disk_idle_counter = 0
+        return min(peak*1.2, DISK_MAX_SCALE)
+
+    # Detectar tráfico bajo
+    if peak < DISK_IDLE_THRESHOLD:
+        disk_idle_counter += 1
+    else:
+        disk_idle_counter = 0
+
+    # Reset si lleva tiempo sin tráfico
+    if disk_idle_counter > DISK_IDLE_RESET_TIME:
+        return DISK_MIN_SCALE
+
+    # Decaimiento progresivo
+    return max(current_max*0.90, DISK_MIN_SCALE)
+
+
+def get_interfaces_ips():
+    """
+    Retorna un diccionario: { "eth0": "192.168.1.5", "wlan0": "192.168.1.10", ... }
+    """
+    result = {}
+    addrs = psutil.net_if_addrs()
+    for iface, addr_list in addrs.items():
+        for addr in addr_list:
+            # AF_INET = IPv4
+            if addr.family == socket.AF_INET:
+                result[iface] = addr.address
+    return result
+
+def run_speedtest():
+    global speedtest_running
+
+    speedtest_running = True
+
+    speedtest_result["status"] = "running"
+    speedtest_result["ping"] = None
+    speedtest_result["download"] = None
+    speedtest_result["upload"] = None
+
+    try:
+        proc = subprocess.run(
+            ["speedtest-cli", "--simple"],
+            capture_output=True,
+            text=True,
+            timeout=60
+        )
+
+        out = proc.stdout
+
+        ping = re.search(r"Ping:\s+([\d.]+)", out)
+        down = re.search(r"Download:\s+([\d.]+)", out)
+        up   = re.search(r"Upload:\s+([\d.]+)", out)
+
+        speedtest_result["ping"] = float(ping.group(1)) if ping else None
+        speedtest_result["download"] = float(down.group(1))/8 if down else None
+        speedtest_result["upload"] = float(up.group(1))/8 if up else None
+
+        speedtest_result["status"] = "done"
+
+    except subprocess.TimeoutExpired:
+        speedtest_result["status"] = "timeout"
+    except Exception:
+        speedtest_result["status"] = "error"
+
+    speedtest_running = False
+
+def start_speedtest():
+    if speedtest_running:
+        return
+    t = threading.Thread(target=run_speedtest, daemon=True)
+    t.start()
+
+def list_all_usb_devices():
+    """
+    Retorna dos listas de dispositivos USB:
+    1. almacenamiento: discos/particiones USB con mountpoint
+    2. otros: cualquier otro USB (teclados, ratones, cámaras, hubs, etc.)
+    Cada dispositivo es un dict con keys: 'name', 'type', 'mount', 'dev', 'size'
+    """
+    storage_devices = []
+    other_devices = []
+
+    # --- Discos USB ---
+    try:
+        out = subprocess.check_output(
+            ["lsblk", "-o", "NAME,MODEL,TRAN,MOUNTPOINT,SIZE,TYPE", "-J"], text=True
+        )
+        blk = json.loads(out)
+        for block in blk.get("blockdevices", []):
+            if block.get("tran") == "usb":
+                # Guardar disco padre
+                dev = {
+                    "name": block.get("model", "USB Disk"),
+                    "type": block.get("type", "disk"),
+                    "mount": block.get("mountpoint"),
+                    "dev": "/dev/" + block.get("name"),
+                    "size": block.get("size"),
+                    "children": []
+                }
+
+                # Guardar particiones como hijos
+                for child in block.get("children", []):
+                    child_dev = {
+                        "name": child.get("model") or child.get("name"),
+                        "type": child.get("type"),
+                        "mount": child.get("mountpoint"),
+                        "dev": "/dev/" + child.get("name"),
+                        "size": child.get("size")
+                    }
+                    dev["children"].append(child_dev)
+
+                storage_devices.append(dev)
+
+    except Exception:
+        pass
+
+    # --- Otros dispositivos USB ---
+    try:
+        out = subprocess.check_output(["lsusb"], text=True)
+        
+        for line in out.strip().split("\n"):
+            if line:
+                other_devices.append({"name": line, "type": "usb", "mount": None, "dev": None, "size": None})
+    except Exception:
+        other_devices.append({"name": "Error listando USBs", "type": "error", "mount": None, "dev": None, "size": None})
+
+    return storage_devices, other_devices
+
+def parse_lsusb_line(line):
+    """
+    Convierte una línea de lsusb en algo más legible:
+    'Bus 004 Device 002: ID 0b05:17eb ASUSTek Computer, Inc. USB-AC55 ...'
+    → 'Bus 004 - ASUSTek Computer, Inc.: USB-AC55 ...'
+    """
+    parts = line.split()
+    try:
+        # Extraer número de bus
+        bus_index = parts.index("Bus") + 1
+        bus = parts[bus_index]
+
+        # Buscar el primer elemento después del ID XXXX:YYYY
+        id_index = parts.index("ID") + 2
+        manufacturer = parts[id_index]
+        model = " ".join(parts[id_index+1:])
+
+        return f"Bus {bus} - {manufacturer}: {model}"
+    except Exception:
+        return line  # fallback si no se puede parsear
+
+
+last_storage_devices = set()  # global
+
+def refresh_usb_devices():
+    """
+    Refresca los dispositivos USB en la ventana actual.
+    """
+    global usb_inner_frame, usb_devices_labels, usb_devices_buttons
+
+    if not usb_win or not usb_win.winfo_exists():
+        return
+
+    storage, others = list_all_usb_devices()
+
+    # Limpiar widgets antiguos (excepto botón refrescar)
+    for key, lbl in list(usb_devices_labels.items()):
+        if key != "refresh_btn": lbl.destroy()
+        usb_devices_labels.pop(key, None)
+    for btn in usb_devices_buttons.values():
+        btn.destroy()
+    usb_devices_buttons.clear()
+
+    # --- Almacenamiento USB ---
+    if storage:
+        lbl_title = ctk.CTkLabel(usb_inner_frame, text="Almacenamiento USB:", text_color="#14611E", bg_color="#212121",
+                            font=("FiraMono Nerd Font", 25, "bold"))
+        lbl_title.pack(anchor="w", pady=(10, 5))
+        usb_devices_labels["storage_title"] = lbl_title
+        for idx, dev in enumerate(storage):
+            name = dev.get("model") or dev.get("name")
+            size = dev.get("size")
+            info_text = f"{name} ({dev['type']}) - {size}"
+            lbl = ctk.CTkLabel(usb_inner_frame, text=info_text, text_color="#00ffff", bg_color="#212121",
+                        font=("FiraMono Nerd Font", 20), wraplength=DSI_WIDTH-60)
+            lbl.pack(anchor="w", pady=2)
+            usb_devices_labels[f"storage_{idx}"] = lbl
+
+        # --- Botón de expulsar para el disco padre siempre ---
+            btn = make_futuristic_button(
+                usb_inner_frame,
+                text="Expulsar",
+                command=lambda d=dev: eject_usb_device_with_popup(d),
+                width=20, 
+                height=4
+            )
+            btn.pack(anchor="w", padx=20, pady=(0,4))
+            usb_devices_buttons[f"storage_{idx}"] = btn
+
+                # --- Mostrar particiones montadas ---
+            children = dev.get("children") or []
+            for c_idx, part in enumerate(children):
+                mount = part.get("mount")
+                name = part.get("name")
+                part_text = f"Partición: {name}"
+                if mount:
+                    part_text += f" | Montado en: {mount}"  # <-- aquí añadimos el punto de montaje
+                    
+            
+
+                # Creamos la etiqueta
+                part_lbl = ctk.CTkLabel(
+                    usb_inner_frame,
+                    text=part_text,
+                    text_color="#00ffff",
+                    bg_color="#212121",
+                    font=("FiraMono Nerd Font", 18),
+                    wraplength=DSI_WIDTH-60
+                )
+                part_lbl.pack(anchor="w", padx=40, pady=1)
+                usb_devices_labels[f"storage_{idx}_part_{c_idx}"] = part_lbl
+
+
+
+    # --- Otros dispositivos USB ---
+    if others:
+        lbl_title = ctk.CTkLabel(usb_inner_frame, text="Otros dispositivos USB:", text_color="#14611E", bg_color="#212121",
+                             font=("FiraMono Nerd Font", 25, "bold"))
+        lbl_title.pack(anchor="w", pady=(10, 5))
+        usb_devices_labels["others_title"] = lbl_title
+
+        for idx, dev in enumerate(others):
+            text = parse_lsusb_line(dev['name'])
+            lbl = ctk.CTkLabel(usb_inner_frame, text=text, text_color="#00ffff", bg_color="#212121",
+                        font=("FiraMono Nerd Font", 18), anchor="w", justify="left", wraplength=DSI_WIDTH-60)
+            lbl.pack(anchor="w", pady=1)
+            usb_devices_labels[f"other_{idx}"] = lbl
+
+def eject_usb_device_with_popup(dev):
+    try:
+        for part in dev.get("children", []):
+            if part.get("mount"):
+                subprocess.run(
+                    ["udisksctl", "unmount", "-b", part["dev"]],
+                    check=True
+                )
+
+        custom_msgbox(
+            usb_win,
+           
+            f"{dev['name']} desmontado correctamente"
+        )
+        subprocess.run(["udisksctl", "power-off", "-b", dev["dev"]], check=True)
+        custom_msgbox(
+            usb_win,
+            f"{dev['name']} expulsado completamente"
+        )
+
+
+    except subprocess.CalledProcessError as e:
+        custom_msgbox(
+            usb_win,
+            f"No se pudo desmontar {dev['name']}\n{e}",
+            title="Error"
+        )
+
+def custom_confirm(parent, text, title="Confirmación"):
+    """
+    Muestra un mensaje con OK y Cancelar y devuelve True si OK, False si Cancelar
+    """
+    result = {"value": False}  # Usamos dict para que se pueda modificar desde el callback
+
+    popup = ctk.CTkToplevel(parent)
+    popup.overrideredirect(True)
+    popup.configure(bg_color="#212121")
+
+    frame = ctk.CTkFrame(popup, bg_color="#212121")
+    frame.pack(fill="both", expand=True, padx=20, pady=20)
+
+    title_lbl = ctk.CTkLabel(frame, text=title, text_color="#00ffff", font=("FiraMono Nerd Font", 24, "bold"))
+    title_lbl.pack(pady=(0,10))
+
+    text_lbl = ctk.CTkLabel(frame, text=text, text_color="white", font=("FiraMono Nerd Font", 22), wraplength=400)
+    text_lbl.pack(pady=(0,15))
+
+    def on_ok():
+        result["value"] = True
+        popup.destroy()
+
+    def on_cancel():
+        result["value"] = False
+        popup.destroy()
+
+    btn_frame = ctk.CTkFrame(frame, bg_color="#212121")
+    btn_frame.pack(pady=(10,0))
+
+    make_futuristic_button(btn_frame, "OK", on_ok, width=20, height=10).pack(side="left", padx=10)
+    make_futuristic_button(btn_frame, "Cancelar", on_cancel, width=20, height=10).pack(side="right", padx=10)
+
+    # Forzar cálculo de tamaño y centrar sobre parent
+    popup.update_idletasks()
+    w, h = popup.winfo_reqwidth(), popup.winfo_reqheight()
+    x = parent.winfo_x() + (parent.winfo_width()//2) - (w//2)
+    y = parent.winfo_y() + (parent.winfo_height()//2) - (h//2)
+    popup.geometry(f"{w}x{h}+{x}+{y}")
+
+    popup.lift()
+    popup.focus_force()
+    popup.grab_set()
+    popup.wait_window()  # Espera a que se cierre el popup
+    return result["value"]
+
+
+# -----------------------------
+# ---------- Variables globales ----------
+# -----------------------------
+ctk.set_appearance_mode("dark")      # o "light"
+ctk.set_default_color_theme("dark-blue")
+root = ctk.CTk()
+root.title("Fan Control")
+root.configure(bg_color="#212121")
+root.overrideredirect(True)
+
+# Variables de control
+mode_var = tk.StringVar(value="auto")
+manual_pwm = tk.IntVar(value=128)
+curve_vars=[]
+last_state=None
+monitor_win = None
+control_fan_win = None
+# Históricos y líneas gráficas
+cpu_hist=deque([0]*HISTORY,maxlen=HISTORY)
+ram_hist=deque([0]*HISTORY,maxlen=HISTORY)
+temp_hist=deque([0]*HISTORY,maxlen=HISTORY)
+cpu_lines  = []
+ram_lines  = []
+temp_lines = []
+
+disk_lbl = None
+disk_val = None
+disk_cvs = None
+disk_hist = deque([0]*HISTORY, maxlen=HISTORY)
+disk_lines = []
+disk_read_hist = deque([0]*HISTORY, maxlen=HISTORY)
+disk_write_hist = deque([0]*HISTORY, maxlen=HISTORY)
+last_disk_io = psutil.disk_io_counters()
+disk_write_lvl = None
+disk_write_val = None
+disk_read_lvl = None
+disk_read_val = None
+disk_write_lines = []
+disk_read_lines = []
+disk_write_cvs = None
+disk_read_cvs = None
+disk_temp_hist = deque([0]*HISTORY, maxlen=HISTORY)
+disk_temp_lvl = None
+disk_temp_val = None
+disk_temp_lines = []
+disk_temp_cvs = None
+disk_write_dynamic_max = 1.0
+disk_read_dynamic_max = 1.0
+
+disk_idle_counter = 0
+
+# Red
+net_download_hist = deque([0]*HISTORY, maxlen=HISTORY) 
+net_upload_hist = deque([0]*HISTORY, maxlen=HISTORY) 
+last_used_iface = None
+last_net_io = {}
+last_net_pernic = psutil.net_io_counters(pernic=True)
+net_win = None
+net_dynamic_max = 1.0
+net_idle_counter = 0
+net_dl_lbl = net_dl_val = net_dl_cvs = None
+net_ul_lbl = net_ul_val = net_ul_cvs = None
+net_dl_lines = []
+net_ul_lines = []
+net_iface_labels = {}  # diccionario: iface -> Label widget
+ips_frame = None       # frame donde estarán las IPs
+speedtest_running = False
+speedtest_result = {
+    "ping": None,
+    "download": None,
+    "upload": None,
+    "status": "idle"
+}
+net_speed_test_lbl = None
+net_speed_test_val = None
+# ---------- Ventana monitor USB ----------
+usb_win = None
+usb_inner_frame = None  # Frame interno donde estarán los dispositivos
+usb_scroll_canvas = None
+usb_scroll_lines = []   # opcional, si quieres animar algún gráfico futuro
+usb_devices_labels = {} # Diccionario: id -> Label widget
+usb_devices_buttons = {}     # idx -> botón de expulsar
+usb_devices_info = []        # lista de dicts con info de cada USB
+
+# -----------------------------
+# ---------- Posicionamiento DSI para root ----------
+# -----------------------------
+def detect_dsi_geometry():
+    """
+    Detecta la posición del DSI conectado y devuelve (x, y).
+    Si no encuentra, devuelve None.
+    """
+    try:
+        out = subprocess.check_output(["xrandr","--query"], stderr=subprocess.DEVNULL).decode()
+        for line in out.splitlines():
+            if " connected " in line:
+                parts = line.split()
+                for tok in parts:
+                    if "+" in tok and "x" in tok:
+                        try:
+                            res,pos = tok.split("+",1)
+                            w,h = map(int,res.split("x"))
+                            x,y = map(int,pos.split("+"))
+                            if w==DSI_WIDTH and h==DSI_HEIGHT:
+                                return x,y
+                        except: pass
+        return None
+    except:
+        return None
+
+pos = detect_dsi_geometry()
+if pos:
+    DSI_X, DSI_Y = pos
+else:
+    screen_w = root.winfo_screenwidth()
+    screen_h = root.winfo_screenheight()
+    DSI_X = max(0, screen_w - DSI_WIDTH)
+    DSI_Y = max(0, screen_h - DSI_HEIGHT)
+
+CTRL_W, CTRL_H = 800, 480
+root.geometry(f"{CTRL_W}x{CTRL_H}+{DSI_X}+{DSI_Y}")
+root.resizable(False, False)
+main = ctk.CTkFrame(root, bg_color="#212121")
+main.pack(fill="both", expand=True)
+menu_frame = ctk.CTkFrame(main, bg_color="#212121")
+menu_frame.pack(fill="both", expand=True)
+# ---------- Canvas ----------
+menu_canvas = ctk.CTkCanvas(menu_frame, bg="#212121", highlightthickness=0)
+menu_canvas.pack(side="left", fill="both", expand=True)
+
+# ---------- Scrollbar ----------
+menu_scrollbar = ctk.CTkScrollbar(
+    menu_frame,
+    orientation="vertical",
+    command=menu_canvas.yview,
+    width=40  # 👈 aquí controlas el tamaño real
+)
+menu_scrollbar.pack(side="right", fill="y")
+
+style_scrollbar_ctk(menu_scrollbar)  # tu estilo personalizado
+
+menu_canvas.configure(yscrollcommand=menu_scrollbar.set)
+
+# ---------- Frame interno ----------
+menu_inner = ctk.CTkFrame(menu_canvas, bg_color="#212121")
+
+menu_canvas.create_window(
+    (0, 0),
+    window=menu_inner,
+    anchor="nw",
+    width=DSI_WIDTH - 50
+)
+
+menu_inner.bind(
+    "<Configure>",
+    lambda e: menu_canvas.configure(scrollregion=menu_canvas.bbox("all"))
+)
+
+#line_1 = ctk.CTkFrame(main, bg_color="#212121"); line_1.pack(fill="both", expand=True, padx=6, pady=2)
+#line_2 = ctk.CTkFrame(main, bg_color="#212121"); line_2.pack(fill="both", expand=True, padx=6, pady=2)
+#line_3 = ctk.CTkFrame(main, bg_color="#212121"); line_3.pack(fill="both", expand=True, padx=6, pady=2)
+bottom = ctk.CTkFrame(main, bg_color="#212121", width=DSI_WIDTH); bottom.pack(fill="x", expand=False, pady=4)
+make_futuristic_button(bottom, "Salir", root.destroy).pack(side="right", padx=10)
+def open_fan_control():
+    global mode_var, manual_pwm, curve_vars, control_fan_win
+    
+    if control_fan_win and control_fan_win.winfo_exists():
+        control_fan_win.lift()
+        return
+    control_fan_win = ctk.CTkToplevel(root)
+    control_fan_win.title("System Monitor")
+    control_fan_win.configure(bg="#212121")
+    control_fan_win.overrideredirect(True)
+    control_fan_win.geometry(f"{DSI_WIDTH}x{DSI_HEIGHT}+{DSI_X}+{DSI_Y}")
+    control_fan_win.resizable(False, False)
+    # -----------------------------
+    # ---------- Layout principal ----------
+    # -----------------------------
+    main = ctk.CTkFrame(control_fan_win, bg_color="#212121"); main.pack(fill="both", expand=True)
+    top = ctk.CTkFrame(main, bg_color="#212121"); top.pack(fill="both", expand=True, padx=6, pady=2)
+    bottom = ctk.CTkFrame(main, bg_color="#212121"); bottom.pack(fill="x", padx=8, pady=4)
+
+    # -----------------------------
+    # ---------- Modo ----------
+    # -----------------------------
+    mode_frame = ctk.CTkFrame(top, bg_color="#212121")
+    mode_frame.pack(fill="x", pady=4)
+
+    mode_label = ctk.CTkLabel(
+        mode_frame,
+        text="Modo",
+        font=("FiraMono Nerd Font", 18, "bold")
+    )
+    mode_label.pack(anchor="w", padx=6, pady=(4, 2))
+
+    modes_row = ctk.CTkFrame(mode_frame, bg_color="#212121", width=DSI_WIDTH-12)
+    modes_row.pack(anchor="w", padx=6, pady=4)
+
+
+    def set_mode(mode):
+        """Actualiza modo y guarda en estado"""
+        mode_var.set(mode)
+        state_service.write_state({"mode":mode,"target_pwm":None})
+
+    for m in ("auto", "silent", "normal", "performance", "manual"):
+        rb = ctk.CTkRadioButton(
+            modes_row,
+            text=m.upper(),
+            variable=mode_var,
+            value=m,
+            command=lambda m=m: set_mode(m),
+
+        )
+        rb.pack(side="left", padx=6)
+        style_radiobutton_ctk(rb)
+
+    # -----------------------------
+    # ---------- PWM Manual ----------
+    # -----------------------------
+    # Frame principal (equivale a LabelFrame)
+    manual_frame = ctk.CTkFrame(top, bg_color="#212121")
+    manual_frame.pack(fill="x", pady=4)
+
+    manual_title = ctk.CTkLabel(
+        manual_frame,
+        text="Control manual PWM",
+        font=("FiraMono Nerd Font", 18, "bold")
+    )
+    manual_title.pack(anchor="w", padx=6, pady=(4, 2))
+
+    manual_row = ctk.CTkFrame(manual_frame, bg_color="#212121")
+    manual_row.pack(fill="x", padx=6, pady=4)
+
+    # Slider (equivale a Scale)
+    manual_scale = ctk.CTkSlider(
+        manual_row,
+        from_=0,
+        to=255,
+        variable=manual_pwm,
+        number_of_steps=255
+    )
+    manual_scale.pack(side="left", fill="x", expand=True)
+    style_slider_ctk(manual_scale)
+
+    # Label que muestra el valor (igual que antes)
+    manual_lbl = ctk.CTkLabel(
+        manual_row,
+        textvariable=manual_pwm,
+        width=40,
+        font=("FiraMono Nerd Font", 18, "bold")
+    )
+    manual_lbl.pack(side="left", padx=12)
+
+    # MISMA lógica, MISMO lambda
+    manual_scale.configure(
+        command=lambda val:
+            state_service.write_state(
+                {
+                    "mode": "manual",
+                    "target_pwm": max(0, min(255, int(float(val))))
+                }
+            ) if mode_var.get() == "manual" else None
+    )
+
+
+    # -----------------------------
+    # ---------- Curva ----------
+    # -----------------------------
+    # Frame principal (antes LabelFrame)
+    curve_frame = ctk.CTkFrame(top, bg_color="#212121")
+    curve_frame.pack(fill="both", expand=True, pady=4)
+
+    curve_canvas = ctk.CTkCanvas(curve_frame, bg="#212121", highlightthickness=0, height=180)
+    curve_canvas.pack(side="left", fill="both", expand=True)
+
+    # Canvas y scrollbar se quedan en Tk
+    scrollbar = ctk.CTkScrollbar(curve_frame, command=curve_canvas.yview, width=40, bg_color="#212121")
+    scrollbar.pack(side="right", fill="y")
+    curve_canvas.configure(yscrollcommand=scrollbar.set)
+    style_scrollbar_ctk(scrollbar)
+
+    curve_inner = ctk.CTkFrame(curve_canvas, bg_color="#212121")
+    curve_canvas.create_window((0,0), window=curve_inner, anchor="nw", width=DSI_WIDTH-50)
+    curve_inner.bind("<Configure>", lambda e: curve_canvas.configure(scrollregion=curve_canvas.bbox("all")))
+    
+    # Contenido dinámico
+    curve_vars.clear()
+
+    for p in curve_logic.load_curve():
+
+        row = ctk.CTkFrame(curve_inner)
+        row.pack(fill="x", pady=6, padx=6, )
+
+        ctk.CTkLabel(
+            row,
+            text=f'{p["temp"]}°C',
+            width=50,
+            font=("FiraMono Nerd Font", 18, "bold")
+        ).pack(side="left")
+
+        var = tk.IntVar(value=p["pwm"])
+
+        ctk.CTkLabel(
+            row,
+            textvariable=var,
+            width=40,
+            font=("FiraMono Nerd Font", 18, "bold")
+        ).pack(side="right")
+
+        scale = ctk.CTkSlider(
+            row,
+            from_=0,
+            to=255,
+            variable=var,
+            number_of_steps=255,
+            height=40,
+            #width=800-155
+        )
+        scale.pack(side="left", fill="x", expand=True, padx=6)
+
+        style_slider_ctk(scale)   # usa la versión CTk que te pasé antes
+
+        curve_vars.append((p["temp"], var))
+
+    # -----------------------------
+    # ---------- Actions ----------
+    # -----------------------------
+    actions = ctk.CTkFrame(bottom); actions.pack(fill="x", pady=4)
+
+    def save_curve():
+        """Guarda los sliders actuales en el archivo JSON"""
+        data = {"points":[{"temp":t,"pwm":v.get()} for t,v in curve_vars]}
+        with open(CURVE_FILE, "w") as f: json.dump(data, f, indent=2)
+        custom_msgbox(root, "Curva guardada correctamente", "Guardado")
+
+    def restore_default():
+        """Restaura la curva por defecto y actualiza sliders"""
+        default = [
+            {
+            "temp": 20,
+            "pwm": 20
+            },
+            {
+            "temp": 30,
+            "pwm": 50
+            },
+            {
+            "temp": 40,
+            "pwm": 100
+            },
+            {
+            "temp": 50,
+            "pwm": 130
+            },
+            {
+            "temp": 60,
+            "pwm": 160
+            },
+            {
+            "temp": 70,
+            "pwm": 180
+            },
+            {
+            "temp": 80,
+            "pwm": 200
+            },
+            {
+            "temp": 90,
+            "pwm": 220
+            },
+            {
+            "temp": 100,
+            "pwm": 255
+            }
+        ]
+        with open(CURVE_FILE, "w") as f: json.dump({"points":default}, f, indent=2)
+        # --- Actualizamos los sliders para reflejar la curva por defecto ---
+        for t_var, (t, var) in zip(default, curve_vars):
+            var.set(t_var["pwm"])
+        custom_msgbox(root, "Curva restaurada por defecto", "Restaurado")
+
+    make_futuristic_button(actions,"Guardar curva", save_curve).pack(side="left", padx=10)
+    make_futuristic_button(actions,"Restaurar por defecto", restore_default).pack(side="left", padx=10)
+    make_futuristic_button(actions, "Cerrar", lambda: control_fan_win.destroy(), width=20).pack(side="right", padx=10)
+
+#make_futuristic_button(line_1, "Control Ventiladores",font_size=18 , command=open_fan_control).pack(side="left", padx=10)
+
+
+# ---------- Ventana monitor placa ----------
+monitor_win = None
+cpu_lbl = cpu_val = cpu_cvs = None
+ram_lbl = ram_val = ram_cvs = None
+temp_lbl = temp_val = temp_cvs = None
+
+def open_monitor_window():
+    global monitor_win, cpu_lbl, cpu_val, cpu_cvs, ram_lbl, ram_val, ram_cvs, temp_lbl, temp_val, temp_cvs
+    global cpu_lines, ram_lines, temp_lines
+    global disk_lbl, disk_val, disk_cvs, disk_lines
+    global disk_write_lvl, disk_write_val, disk_read_lvl, disk_read_val, disk_write_lines, disk_read_lines, disk_write_cvs, disk_read_cvs
+    global disk_temp_lvl, disk_temp_val, disk_temp_lines, disk_temp_cvs
+    if monitor_win and monitor_win.winfo_exists():
+        monitor_win.lift()
+        return
+
+    monitor_win = ctk.CTkToplevel(root)
+    monitor_win.title("System Monitor")
+    monitor_win.configure(bg="#212121")
+    monitor_win.overrideredirect(True)
+    monitor_win.geometry(f"{DSI_WIDTH}x{DSI_HEIGHT}+{DSI_X}+{DSI_Y}")
+    monitor_win.resizable(False, False)
+
+    main_frame = ctk.CTkFrame(monitor_win)
+    main_frame.pack(fill="both", expand=True)
+
+    # --- Sección hardware ---
+    section_hw = ctk.CTkFrame(main_frame)
+    section_hw.pack(fill="both", expand=True, pady=5)
+
+    hw_canvas = ctk.CTkCanvas(section_hw, bg="#212121", highlightthickness=0)
+    hw_canvas.pack(side="left", fill="both", expand=True)
+    hw_scrollbar = ctk.CTkScrollbar(section_hw, command=hw_canvas.yview, width=30)
+    hw_scrollbar.pack(side="right", fill="y")
+    style_scrollbar_ctk(hw_scrollbar)
+    hw_canvas.configure(yscrollcommand=hw_scrollbar.set)
+
+    hw_inner = ctk.CTkFrame(hw_canvas)
+    hw_canvas.create_window((0,0), window=hw_inner, anchor="nw", width=DSI_WIDTH-35)
+
+    hw_inner.bind("<Configure>", lambda e: hw_canvas.configure(scrollregion=hw_canvas.bbox("all")))
+
+    # --- Bloques CPU, RAM, TEMP ---
+    cpu_lbl, cpu_val, cpu_cvs = make_block_ctk(hw_inner, "CPU %")
+    ram_lbl, ram_val, ram_cvs = make_block_ctk(hw_inner, "RAM %")
+    temp_lbl, temp_val, temp_cvs = make_block_ctk(hw_inner, "TEMP °C")
+
+    cpu_lines  = init_graph_lines(cpu_cvs, HISTORY, cpu_lbl.cget("text_color"))
+    ram_lines  = init_graph_lines(ram_cvs, HISTORY, ram_lbl.cget("text_color"))
+    temp_lines = init_graph_lines(temp_cvs, HISTORY, temp_lbl.cget("text_color"))
+
+    # --- Bloques disco ---
+    disk_lbl, disk_val, disk_cvs = make_block_ctk(hw_inner, "DISK %")
+    disk_lines = init_graph_lines(disk_cvs, HISTORY, disk_lbl.cget("text_color"))
+
+    disk_write_lvl, disk_write_val, disk_write_cvs = make_block_ctk(hw_inner, "DISK WRITE MB/s")
+    disk_read_lvl, disk_read_val, disk_read_cvs = make_block_ctk(hw_inner, "DISK READ MB/s")
+    disk_write_lines = init_graph_lines(disk_write_cvs, HISTORY, disk_write_lvl.cget("text_color"))
+    disk_read_lines = init_graph_lines(disk_read_cvs, HISTORY, disk_read_lvl.cget("text_color"))
+
+    disk_temp_lvl, disk_temp_val, disk_temp_cvs = make_block_ctk(hw_inner, "DISK TEMP °C")
+    disk_temp_lines = init_graph_lines(disk_temp_cvs, HISTORY, disk_temp_lvl.cget("text_color"))
+    # --- Sección inferior ---
+    section_bottom = ctk.CTkFrame(main_frame)
+    section_bottom.pack(fill="x")
+    bottom_frame = ctk.CTkFrame(section_bottom); bottom_frame.pack(fill="x", padx=8, pady=6)
+
+    make_futuristic_button(bottom_frame, "Red", open_net_window, width=20).pack(side="left", padx=10)
+    make_futuristic_button(bottom_frame, "USB", open_usb_window, width=20).pack(side="left", padx=10)
+    make_futuristic_button(bottom_frame, "Cerrar", lambda: monitor_win.destroy()).pack(side="right", padx=10)
+
+#make_futuristic_button(line_1, "Monitor Placa", open_monitor_window).pack(side="left", padx=10)
+    
+# -----------------------------
+# ---------- Ventana monitor de red ----------
+# -----------------------------
+def refresh_ips():
+    # Primero, eliminar los labels existentes
+    for lbl in net_iface_labels.values():
+        lbl.destroy()
+    net_iface_labels.clear()  # Limpiamos el diccionario
+    iface_ips = get_interfaces_ips()
+    for iface, ip in iface_ips.items():
+        lbl = ctk.CTkLabel(ips_frame, text=f"{iface}: {ip}", text_color="#00ffff", bg_color="#212121",
+                       font=("FiraFiraMono Nerd Font", 20), anchor="w", width=DSI_WIDTH-35)
+        lbl.pack(anchor="w")
+        net_iface_labels[iface] = lbl
+
+def open_net_window():
+    global net_win
+    global net_dl_lbl, net_dl_val, net_dl_cvs
+    global net_ul_lbl, net_ul_val, net_ul_cvs
+    global net_dl_lines, net_ul_lines
+    global ips_frame, net_iface_labels, last_used_iface, last_net_io
+    global net_speed_test_lbl, net_speed_test_val
+    if net_win and net_win.winfo_exists():
+        net_win.lift()
+        return
+
+    net_win = ctk.CTkToplevel(root)
+    net_win.title("Red")
+    net_win.configure(bg_color="#212121")
+    net_win.overrideredirect(True)
+    net_win.geometry(f"{DSI_WIDTH}x{DSI_HEIGHT}+{DSI_X}+{DSI_Y}")
+    net_win.resizable(False, False)
+
+    main_frame = ctk.CTkFrame(net_win, bg_color="#212121")
+    main_frame.pack(fill="both", expand=True)
+
+    net_section = ctk.CTkFrame(main_frame, bg_color="#212121")
+    net_section.pack(fill="both", expand=True, pady=5)
+
+    net_canvas = ctk.CTkCanvas(net_section, bg="#212121", highlightthickness=0)
+    net_canvas.pack(side="left", fill="both", expand=True)
+    net_scrollbar = ctk.CTkScrollbar(net_section, orientation="vertical", command=net_canvas.yview, width=30)
+    net_scrollbar.pack(side="right", fill="y")
+    style_scrollbar_ctk(net_scrollbar)
+    net_canvas.configure(yscrollcommand=net_scrollbar.set)
+
+    net_inner = ctk.CTkFrame(net_canvas, bg_color="#212121")
+    net_canvas.create_window((0,0), window=net_inner, anchor="nw", width=DSI_WIDTH-35)
+    net_inner.bind("<Configure>", lambda e: net_canvas.configure(scrollregion=net_canvas.bbox("all")))
+
+    # --- Bloques descarga/subida ---
+    net_dl_lbl, net_dl_val, net_dl_cvs = make_block_ctk(net_inner, "DESCARGA MB/s")
+    net_dl_lines = init_graph_lines(net_dl_cvs, HISTORY, "#00ffff")
+    net_ul_lbl, net_ul_val, net_ul_cvs = make_block_ctk(net_inner, "SUBIDA MB/s")
+    net_ul_lines = init_graph_lines(net_ul_cvs, HISTORY, "#ffaa00")
+    # --- Bloque speedtest ---
+    net_speed_test_lbl = ctk.CTkLabel(
+        net_inner,
+        text="TEST DE VELOCIDAD",
+        text_color="#14611E",
+        bg_color="#212121",
+        font=("FiraFiraMono Nerd Font", 25, "bold")
+    )
+    net_speed_test_lbl.pack(anchor="w", pady=(10, 0))
+
+    net_speed_test_val = ctk.CTkLabel(
+        net_inner,
+        text="Esperando test...",
+        text_color="#00ffff",
+        bg_color="#212121",
+        font=("FiraFiraMono Nerd Font", 20)
+    )
+    net_speed_test_val.pack(anchor="w", pady=(0, 10))
+    # --- Bloque de IPs ---
+    ips_frame = ctk.CTkFrame(net_inner, bg_color="#212121")
+    ips_frame.pack(fill="x", pady=(0, 10))
+    ctk.CTkLabel(ips_frame, text="Interfaces y IPs:", text_color="#14611E", bg_color="#212121", anchor="w", width=DSI_WIDTH-35,
+            font=("FiraFiraMono Nerd Font", 25, "bold")).pack(anchor="w")
+
+    iface_ips = get_interfaces_ips()
+    for iface, ip in iface_ips.items():
+        lbl = ctk.CTkLabel(ips_frame, text=f"{iface}: {ip}", text_color="#00ffff", bg_color="#212121",
+                       font=("FiraFiraMono Nerd Font", 20), anchor="w", width=DSI_WIDTH-35)
+        lbl.pack(anchor="w")
+        net_iface_labels[iface] = lbl
+
+    # --- Sección inferior ---
+
+    bottom = ctk.CTkFrame(net_win, bg_color="#212121")
+    bottom.pack(fill="x", pady=6)
+    make_futuristic_button(
+        bottom,
+        "Test velocidad",
+        start_speedtest,
+    ).pack(side="left", padx=10)
+    make_futuristic_button(
+        bottom,
+        "Actualizar",
+        refresh_ips,
+    ).pack(side="left", padx=10, pady=10)
+
+    make_futuristic_button(bottom, "Cerrar", lambda: net_win.destroy()).pack(side="right", padx=10)
+
+#make_futuristic_button(line_1, "Monitor Red", open_net_window).pack(side="left", padx=10)
+
+def open_usb_window():
+    """
+    Abre la ventana de dispositivos USB.
+    """
+    global usb_win, usb_inner_frame, usb_scroll_canvas
+    global usb_devices_labels, usb_devices_buttons
+
+    if usb_win and usb_win.winfo_exists():
+        usb_win.lift()
+        return
+
+    usb_win = ctk.CTkToplevel(root)
+    usb_win.title("Dispositivos USB")
+    usb_win.configure(bg="#212121")
+    usb_win.overrideredirect(True)
+    usb_win.geometry(f"{DSI_WIDTH}x{DSI_HEIGHT}+{DSI_X}+{DSI_Y}")
+    usb_win.resizable(False, False)
+
+    main_frame = ctk.CTkFrame(usb_win, bg_color="#212121")
+    main_frame.pack(fill="both", expand=True)
+    usb_section = ctk.CTkFrame(main_frame, bg_color="#212121")
+    usb_section.pack(fill="both", expand=True, pady=5)
+    # Scrollable frame
+    usb_scroll_canvas = ctk.CTkCanvas(usb_section, bg="#212121", highlightthickness=0)
+    usb_scroll_canvas.pack(side="left", fill="both", expand=True)
+    usb_scrollbar = ctk.CTkScrollbar(usb_section, orientation="vertical", command=usb_scroll_canvas.yview, width=30)
+    usb_scrollbar.pack(side="right", fill="y")
+    style_scrollbar_ctk(usb_scrollbar)
+    usb_scroll_canvas.configure(yscrollcommand=usb_scrollbar.set)
+
+    usb_inner_frame = ctk.CTkFrame(usb_scroll_canvas, bg_color="#212121")
+    usb_scroll_canvas.create_window((0,0), window=usb_inner_frame, anchor="nw", width=DSI_WIDTH-35)
+    usb_inner_frame.bind("<Configure>", lambda e: usb_scroll_canvas.configure(scrollregion=usb_scroll_canvas.bbox("all")))
+
+
+    # Limpiar contenedores
+    usb_devices_labels.clear()
+    usb_devices_buttons.clear()
+
+    # Botón cerrar siempre abajo
+    bottom_frame = ctk.CTkFrame(main_frame, bg_color="#212121")
+    bottom_frame.pack(fill="x", pady=6, padx=8)
+    make_futuristic_button(bottom_frame, "Cerrar", usb_win.destroy).pack(side="right", padx=10)
+    refresh_btn = make_futuristic_button(
+        bottom_frame, "Refrescar USB", refresh_usb_devices
+    )
+    refresh_btn.pack(anchor="w", pady=5)
+
+    # Carga inicial
+    refresh_usb_devices()
+
+#make_futuristic_button(line_2, "Monitor USB", open_usb_window).pack(side="left", padx=10)
+
+def run_script(script_path):
+    def _run():
+        try:
+            proc = subprocess.run(
+                [script_path],
+                capture_output=True,
+                text=True,
+                check=True
+            )
+            if proc.stdout.strip():
+                custom_msgbox(root, proc.stdout, "Salida")
+        except subprocess.CalledProcessError as e:
+            custom_msgbox(
+                root,
+                f"Error ejecutando script:\n{e.stderr or e}",
+                "Error"
+            )
+        except Exception as e:
+            custom_msgbox(root, str(e), "Error")
+
+    threading.Thread(target=_run, daemon=True).start()
+
+def open_lanzadores():
+    global lanzadores_win
+
+    if 'lanzadores_win' in globals() and lanzadores_win and lanzadores_win.winfo_exists():
+        lanzadores_win.lift()
+        return
+
+    lanzadores_win = ctk.CTkToplevel(root)
+    lanzadores_win.title("Lanzadores")
+    lanzadores_win.configure(bg="#212121")
+    lanzadores_win.overrideredirect(True)
+    lanzadores_win.geometry(f"{DSI_WIDTH}x{DSI_HEIGHT}+{DSI_X}+{DSI_Y}")
+    lanzadores_win.resizable(False, False)
+
+    main = ctk.CTkFrame(lanzadores_win, bg_color="#212121")
+    main.pack(fill="both", expand=True, padx=5, pady=5)
+    title = ctk.CTkLabel(
+        main,
+        text="LANZADORES",
+        text_color="#14611E",
+        bg_color="#212121",
+        font=("FiraFiraMono Nerd Font", 24, "bold"),
+        anchor="w"
+    )
+    title.pack(anchor="w", pady=(0, 20))
+    top = ctk.CTkFrame(main, bg_color="#212121")
+    top.pack(fill="both", expand=True, pady=5)
+    lanzadore_canvas = ctk.CTkCanvas(top, bg="#212121", highlightthickness=0)
+    lanzadore_canvas.pack(side="left", fill="both", expand=True)
+    lanzadores_scrollbar = ctk.CTkScrollbar(top, orientation="vertical", command=lanzadore_canvas.yview, width=30)
+    lanzadores_scrollbar.pack(side="right", fill="y")
+    style_scrollbar_ctk(lanzadores_scrollbar)
+    lanzadore_canvas.configure(yscrollcommand=lanzadores_scrollbar.set)
+    lanzadores_inner = ctk.CTkFrame(lanzadore_canvas, bg_color="#212121")
+    lanzadore_canvas.create_window((0,0), window=lanzadores_inner, anchor="nw", width=DSI_WIDTH-35)
+    lanzadores_inner.bind("<Configure>", lambda e: lanzadore_canvas.configure(scrollregion=lanzadore_canvas.bbox("all")))
+
+    columnas=2
+    # --- Botones ---
+    for i, launcher in enumerate(LAUNCHERS):
+        texto=launcher["label"]
+        script=launcher["script"]
+        fila = i//columnas
+        columna = i % columnas
+        btn = make_futuristic_button(
+            lanzadores_inner,
+            text=texto,
+            command=lambda s=script, l=texto: run_script(s) if custom_confirm(root, f"¿Seguro que quieres ejecutar {l}?") else None,
+            width=30,
+            height=15,
+            font_size=30,
+        )
+        btn.grid(row=fila, column=columna, padx=10, pady=10, sticky="nsew")
+    for c in range(columnas):
+        lanzadores_inner.grid_columnconfigure(c, weight=1)
+
+    
+    # --- Cerrar ---
+    bottom = ctk.CTkFrame(main, bg_color="#212121")
+    bottom.pack(side="bottom", fill="x", pady=10)
+
+    make_futuristic_button(
+        bottom,
+        "Cerrar",
+        lanzadores_win.destroy
+    ).pack(side="right")
+
+#make_futuristic_button(line_2, "Lanzadores", open_lanzadores).pack(side="left", padx=10)
+botones_menu = [
+    ("Control Ventiladores", open_fan_control),
+    ("Monitor Placa", open_monitor_window),
+    ("Monitor Red", open_net_window),
+    ("Monitor USB", open_usb_window),
+    ("Lanzadores", open_lanzadores),
+]
+
+columnas = 2  # cuantos botones por fila quieres
+
+for i, (texto, comando) in enumerate(botones_menu):
+    fila = i // columnas
+    columna = i % columnas
+
+    btn = make_futuristic_button(
+        menu_inner,
+        texto,
+        command=comando,
+        font_size=20,
+        width=30,
+        height=15
+    )
+
+    btn.grid(row=fila, column=columna, padx=10, pady=10, sticky="nsew")
+    
+for c in range(columnas):
+    menu_inner.grid_columnconfigure(c, weight=1)
+
+# -----------------------------
+# ---------- Update loop ----------
+# -----------------------------
+def update():
+    global last_state, last_disk_io, last_net_io, last_used_iface, net_dynamic_max, net_idle_counter, disk_read_dynamic_max,disk_write_dynamic_max, disk_idle_counter
+
+    # --- Cargar estado ---
+    try:
+        st = state_service.load_state()
+        if st != last_state:
+            last_state = st
+            mode_var.set(st.get("mode","auto"))
+            tp = st.get("target_pwm")
+            if isinstance(tp,int): manual_pwm.set(tp)
+    except: pass
+
+    # --- Lecturas del sistema ---
+    cpu = system_metrics.get_cpu_usage()
+    ram = system_metrics.get_ram_usage()
+    temp = system_metrics.get_cpu_temp()
+    disk = system_metrics.get_disk_usage()
+    disk_io = system_metrics.get_disk_io()
+    disk_read = disk_io["read_mb"]
+    disk_write = disk_io["write_mb"]
+    disk_temp = system_metrics.get_disk_temp()
+
+    # --- Gestión PWM ---
+    try:
+        st = state_service.load_state()
+        mode = st.get("mode","auto"); current_target = st.get("target_pwm")
+        if mode=="manual":
+            desired = int(current_target) if isinstance(current_target,int) else int(manual_pwm.get())
+        elif mode=="auto":
+            desired = curve_logic.compute_pwm(temp)
+        elif mode=="silent": desired=77
+        elif mode=="normal": desired=128
+        elif mode=="performance": desired=255
+        else: desired = curve_logic.compute_pwm(temp)
+        desired = max(0, min(255, int(desired)))
+        if desired != current_target:
+            state_service.write_state({"mode":mode,"target_pwm":desired})
+    except: pass
+
+    # --- Actualizar ventana monitor si existe ---
+    if monitor_win and monitor_win.winfo_exists():
+        cpu_hist.append(cpu); ram_hist.append(ram); temp_hist.append(temp)
+        cpu_c = level_color(cpu, CPU_WARN, CPU_CRIT)
+        ram_c = level_color(ram, RAM_WARN, RAM_CRIT)
+        tmp_c = level_color(temp, TEMP_WARN, TEMP_CRIT)
+        recolor_lines(cpu_cvs, cpu_lines, cpu_c)
+        recolor_lines(ram_cvs, ram_lines, ram_c)
+        recolor_lines(temp_cvs, temp_lines, tmp_c)
+        update_graph_lines(cpu_cvs, cpu_lines, cpu_hist, 100)
+        update_graph_lines(ram_cvs, ram_lines, ram_hist, 100)
+        update_graph_lines(temp_cvs, temp_lines, temp_hist, 85)
+        cpu_lbl.configure(text_color=cpu_c); cpu_val.configure(text=f"{cpu:4.0f} %", text_color=cpu_c)
+        ram_lbl.configure(text_color=ram_c); ram_val.configure(text=f"{ram:4.0f} %", text_color=ram_c)
+        temp_lbl.configure(text_color=tmp_c); temp_val.configure(text=f"{temp:4.1f} °C", text_color=tmp_c)
+
+        # --- Disco ---
+        disk = system_metrics.get_disk_usage()
+        disk_hist.append(disk)
+        disk_c = level_color(disk, 60, 80)
+        recolor_lines(disk_cvs, disk_lines, disk_c)
+        update_graph_lines(disk_cvs, disk_lines, disk_hist, 100)
+        disk_lbl.configure(text_color=disk_c)
+        disk_val.configure(text=f"{disk:.0f} %", text_color=disk_c)
+
+        disk_write_mb = disk_write
+        disk_read_mb = disk_read
+        disk_write_hist.append(disk_write_mb)
+        disk_read_hist.append(disk_read_mb)
+        write_c = level_color(disk_write_mb, 10, 50)
+        read_c = level_color(disk_read_mb, 10, 50)
+        recolor_lines(disk_write_cvs, disk_write_lines, write_c)
+        recolor_lines(disk_read_cvs, disk_read_lines, read_c)
+        disk_write_dynamic_max = adaptive_disk_scale(disk_write_dynamic_max, list(disk_write_hist))
+        disk_read_dynamic_max  = adaptive_disk_scale(disk_read_dynamic_max,  list(disk_read_hist))
+
+        update_graph_lines(disk_write_cvs, disk_write_lines, disk_write_hist, disk_write_dynamic_max)
+        update_graph_lines(disk_read_cvs, disk_read_lines, disk_read_hist, disk_read_dynamic_max)
+
+        disk_write_lvl.configure(text_color=write_c)
+        disk_read_lvl.configure(text_color=read_c)
+        disk_write_val.configure(text=f"{disk_write_mb:.1f} MB/s", text_color=write_c)
+        disk_read_val.configure(text=f"{disk_read_mb:.1f} MB/s", text_color=read_c)
+        disk_temp_celsius = system_metrics.get_disk_temp()
+        disk_temp_hist.append(disk_temp_celsius)
+        disk_temp_c = level_color(disk_temp, TEMP_WARN, TEMP_CRIT)
+        recolor_lines(disk_temp_cvs, disk_temp_lines, disk_temp_c)
+        update_graph_lines(disk_temp_cvs, disk_read_lines, disk_temp_hist, 85)
+        disk_temp_lvl.configure(text_color=disk_temp_c)
+        disk_temp_val.configure(text=f"{disk_temp_celsius} °C", text_color=disk_temp_c)
+    if net_win and net_win.winfo_exists():
+        iface, stats = get_net_io(NET_INTERFACE)
+
+        prev = last_net_io.get(iface)
+        dl, ul = safe_net_speed(stats, prev)
+
+        last_net_io[iface] = stats
+        last_used_iface = iface
+
+        net_download_hist.append(dl)
+        net_upload_hist.append(ul)
+
+        net_dynamic_max = adaptive_scale(
+            net_dynamic_max,
+            list(net_download_hist) + list(net_upload_hist)
+        )
+
+        recolor_lines(net_dl_cvs, net_dl_lines, net_color(dl))
+        recolor_lines(net_ul_cvs, net_ul_lines, net_color(ul))
+        update_graph_lines(net_dl_cvs, net_dl_lines, net_download_hist, net_dynamic_max)
+        update_graph_lines(net_ul_cvs, net_ul_lines, net_upload_hist, net_dynamic_max)
+
+        net_dl_lbl.configure(text=f"DESCARGA MB/s ({iface})", text_color=net_color(dl))
+        net_ul_lbl.configure(text=f"SUBIDA MB/s ({iface})", text_color=net_color(ul))
+        net_dl_val.configure(text=f"{dl:.2f} MB/s | Escala: {net_dynamic_max:.2f}", text_color=net_color(dl))
+        net_ul_val.configure(text=f"{ul:.2f} MB/s | Escala: {net_dynamic_max:.2f}", text_color=net_color(ul))
+        if (
+            net_win and net_win.winfo_exists()
+            and net_speed_test_val is not None
+        ):
+            st = speedtest_result["status"]
+
+            if st == "idle":
+                net_speed_test_val.configure(
+                    text="Esperando test...",
+                    text_color="#00ffff"
+                )
+
+            elif st == "running":
+                net_speed_test_val.configure(
+                    text="Ejecutando test...",
+                    text_color="#ffaa00"
+                )
+
+            elif st == "done":
+                net_speed_test_val.configure(
+                    text=(
+                        f"Ping: {speedtest_result['ping']} ms\n"
+                        f"↓ {speedtest_result['download']} MB/s\n"
+                        f"↑ {speedtest_result['upload']} MB/s"
+                    ),
+                    text_color="#00ffff"
+                )
+
+            elif st == "timeout":
+                net_speed_test_val.configure(
+                    text="Timeout en el test",
+                    text_color="#ff3333"
+                )
+
+            elif st == "error":
+                net_speed_test_val.configure(
+                    text="Error ejecutando test",
+                    text_color="#ff3333"
+                )
+
+
+    root.after(UPDATE_MS, update)
+
+# -----------------------------
+# ---------- Inicio ----------
+# -----------------------------
+update()
+root.mainloop()
