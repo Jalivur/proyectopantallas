@@ -78,5 +78,4 @@ class UsbService:
             return f"Bus {bus} - {manufacturer}: {model}"
         except Exception:
             return line  # fallback si no se puede parsear
-
         

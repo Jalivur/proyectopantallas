@@ -1,5 +1,6 @@
 import psutil
 import time
+import socket
 from config.settings import NET_INTERFACE
 
 class NetworkService:
@@ -57,3 +58,16 @@ class NetworkService:
             "download_bytes": max(0, download),
             "delta_time": delta_time
         }
+    def get_interfaces_ips(self):
+        """
+        Retorna un diccionario: { "eth0": "192.168.1.5", "wlan0": "192.168.1.10", ... }
+        """
+        result = {}
+        addrs = psutil.net_if_addrs()
+        for iface, addr_list in addrs.items():
+            for addr in addr_list:
+                # AF_INET = IPv4
+                if addr.family == socket.AF_INET:
+                    result[iface] = addr.address
+        return result
+    

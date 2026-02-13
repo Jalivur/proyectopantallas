@@ -17,6 +17,7 @@ from core.system_metrics import SystemMetrics
 from services.usb_service import UsbService
 from services.network_service import NetworkService
 from core.network_metrics import NetworkMetrics
+from services.speedtest_service import SpeedtestService
 
 
 
@@ -163,6 +164,7 @@ curve_logic = CurveLogic()
 system_metrics = SystemMetrics()
 network_service = NetworkService()
 network_metrics = NetworkMetrics()
+speedtest_service = SpeedtestService()
 usb_service = UsbService()
 # -----------------------------
 # ---------- Graph helpers ----------
@@ -246,106 +248,6 @@ def make_block_ctk(parent,title):
     cvs=ctk.CTkCanvas(parent,width=WIDTH,height=HEIGHT,bg="#212121",highlightthickness=0)
     cvs.pack()
     return lbl,val,cvs
-# -----------------------------
-# ---------- Network helpers ----------
-# -----------------------------
-def get_net_io(interface=None):
-    """
-    Retorna la interfaz usada y sus stats.
-    Evita picos absurdos y mantiene el historial correcto.
-    """
-    global last_net_pernic
-
-    stats = psutil.net_io_counters(pernic=True)
-
-    if interface and interface in stats:
-        last_net_pernic = stats
-        return interface, stats[interface]
-
-    best_name = None
-    best_speed = -1
-
-    for name in stats:
-        if name not in last_net_pernic:
-            continue
-
-        curr = stats[name]
-        prev = last_net_pernic[name]
-
-        speed = (
-            (curr.bytes_recv - prev.bytes_recv) +
-            (curr.bytes_sent - prev.bytes_sent)
-        )
-
-        # --- Evitar picos absurdos ---
-        if speed < 0 or speed > 500*1024*1024:  # 500 MB en intervalo
-            continue
-
-        if speed > best_speed:
-            best_speed = speed
-            best_name = name
-
-    last_net_pernic = stats
-
-    if best_name:
-        return best_name, stats[best_name]
-
-    # fallback
-    name = next(iter(stats))
-    return name, stats[name]
-
-def safe_net_speed(curr, prev):
-    if not prev:
-        return 0.0, 0.0
-
-    dl = curr.bytes_recv - prev.bytes_recv
-    ul = curr.bytes_sent - prev.bytes_sent
-
-    # --- Si el contador bajó → reset ---
-    if dl < 0 or ul < 0:
-        return 0.0, 0.0
-
-    # convertir a MB/s
-    dl = dl / 1024 / 1024
-    ul = ul / 1024 / 1024
-
-    # --- Filtro de picos absurdos ---
-    if dl > 500 or ul > 500:
-        return 0.0, 0.0
-
-    return dl, ul
-
-def adaptive_scale(current_max, data):
-    """
-    Ajusta escala dinámica, sube rápido con tráfico real,
-    baja progresivamente y se reinicia si hay inactividad.
-    """
-    global net_idle_counter
-
-    if not data:
-        return current_max * 0.5
-
-    peak = max(data)
-
-    # --- Subir rápido si hay tráfico real ---
-    if peak > current_max:
-        net_idle_counter = 0
-        return min(peak * 1.2, NET_MAX_SCALE)
-
-    # --- Detectar tráfico bajo ---
-    if peak < NET_IDLE_THRESHOLD:
-        net_idle_counter += 1
-    else:
-        net_idle_counter = 0
-
-    # --- Reset si lleva tiempo sin tráfico ---
-    if net_idle_counter > NET_IDLE_RESET_TIME:
-        return NET_MIN_SCALE
-
-    # --- Decaimiento progresivo ---
-    new_val = current_max * 0.90
-    return max(new_val, NET_MIN_SCALE)
-
 
 
 def adaptive_disk_scale(current_max, data):
@@ -374,61 +276,7 @@ def adaptive_disk_scale(current_max, data):
     return max(current_max*0.90, DISK_MIN_SCALE)
 
 
-def get_interfaces_ips():
-    """
-    Retorna un diccionario: { "eth0": "192.168.1.5", "wlan0": "192.168.1.10", ... }
-    """
-    result = {}
-    addrs = psutil.net_if_addrs()
-    for iface, addr_list in addrs.items():
-        for addr in addr_list:
-            # AF_INET = IPv4
-            if addr.family == socket.AF_INET:
-                result[iface] = addr.address
-    return result
 
-def run_speedtest():
-    global speedtest_running
-
-    speedtest_running = True
-
-    speedtest_result["status"] = "running"
-    speedtest_result["ping"] = None
-    speedtest_result["download"] = None
-    speedtest_result["upload"] = None
-
-    try:
-        proc = subprocess.run(
-            ["speedtest-cli", "--simple"],
-            capture_output=True,
-            text=True,
-            timeout=60
-        )
-
-        out = proc.stdout
-
-        ping = re.search(r"Ping:\s+([\d.]+)", out)
-        down = re.search(r"Download:\s+([\d.]+)", out)
-        up   = re.search(r"Upload:\s+([\d.]+)", out)
-
-        speedtest_result["ping"] = float(ping.group(1)) if ping else None
-        speedtest_result["download"] = float(down.group(1))/8 if down else None
-        speedtest_result["upload"] = float(up.group(1))/8 if up else None
-
-        speedtest_result["status"] = "done"
-
-    except subprocess.TimeoutExpired:
-        speedtest_result["status"] = "timeout"
-    except Exception:
-        speedtest_result["status"] = "error"
-
-    speedtest_running = False
-
-def start_speedtest():
-    if speedtest_running:
-        return
-    t = threading.Thread(target=run_speedtest, daemon=True)
-    t.start()
 
 
 
@@ -593,6 +441,7 @@ def custom_confirm(parent, text, title="Confirmación"):
     return result["value"]
 
 
+
 # -----------------------------
 # ---------- Variables globales ----------
 # -----------------------------
@@ -660,12 +509,6 @@ net_ul_lines = []
 net_iface_labels = {}  # diccionario: iface -> Label widget
 ips_frame = None       # frame donde estarán las IPs
 speedtest_running = False
-speedtest_result = {
-    "ping": None,
-    "download": None,
-    "upload": None,
-    "status": "idle"
-}
 net_speed_test_lbl = None
 net_speed_test_val = None
 # ---------- Ventana monitor USB ----------
@@ -1062,7 +905,7 @@ def refresh_ips():
     for lbl in net_iface_labels.values():
         lbl.destroy()
     net_iface_labels.clear()  # Limpiamos el diccionario
-    iface_ips = get_interfaces_ips()
+    iface_ips = network_service.get_interfaces_ips()
     for iface, ip in iface_ips.items():
         lbl = ctk.CTkLabel(ips_frame, text=f"{iface}: {ip}", text_color="#00ffff", bg_color="#212121",
                        font=("FiraFiraMono Nerd Font", 20), anchor="w", width=DSI_WIDTH-35)
@@ -1133,7 +976,7 @@ def open_net_window():
     ctk.CTkLabel(ips_frame, text="Interfaces y IPs:", text_color="#14611E", bg_color="#212121", anchor="w", width=DSI_WIDTH-35,
             font=("FiraFiraMono Nerd Font", 25, "bold")).pack(anchor="w")
 
-    iface_ips = get_interfaces_ips()
+    iface_ips = network_service.get_interfaces_ips()
     for iface, ip in iface_ips.items():
         lbl = ctk.CTkLabel(ips_frame, text=f"{iface}: {ip}", text_color="#00ffff", bg_color="#212121",
                        font=("FiraFiraMono Nerd Font", 20), anchor="w", width=DSI_WIDTH-35)
@@ -1147,7 +990,7 @@ def open_net_window():
     make_futuristic_button(
         bottom,
         "Test velocidad",
-        start_speedtest,
+        speedtest_service.start,
     ).pack(side="left", padx=10)
     make_futuristic_button(
         bottom,
@@ -1459,7 +1302,8 @@ def update():
             net_win and net_win.winfo_exists()
             and net_speed_test_val is not None
         ):
-            st = speedtest_result["status"]
+            result = speedtest_service.get_result()
+            st = result["status"]
 
             if st == "idle":
                 net_speed_test_val.configure(
@@ -1476,9 +1320,9 @@ def update():
             elif st == "done":
                 net_speed_test_val.configure(
                     text=(
-                        f"Ping: {speedtest_result['ping']} ms\n"
-                        f"↓ {speedtest_result['download']} MB/s\n"
-                        f"↑ {speedtest_result['upload']} MB/s"
+                        f"Ping: {result['ping']} ms\n"
+                        f"↓ {result['download']} MB/s\n"
+                        f"↑ {result['upload']} MB/s"
                     ),
                     text_color="#00ffff"
                 )
