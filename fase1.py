@@ -10,8 +10,8 @@ from Code.oled import OLED
 import json
 import os
 
-STATE_FILE = "/home/jalivur/Documents/proyectopantallas/fan_state.json"
-#STATE_FILE = "/home/jalivur/Documents/System_dashboard/data/fan_state.json"
+#STATE_FILE = "/home/jalivur/Documents/proyectopantallas/fan_state.json"
+STATE_FILE = "/home/jalivur/Documents/system_dashboard/data/fan_state.json"
 
 def read_fan_state():
     if not os.path.exists(STATE_FILE):
