@@ -117,45 +117,114 @@ _LED_MODE_MAP = {
     "breathing": 3,
     "rainbow":   4,
 }
+# ── Estado LED aplicado por última vez ─────────────────────────────────────
+# Se compara con el estado deseado para solo escribir I2C cuando cambia algo.
+_last_led_applied = {
+    "mode": None,   # modo aplicado (None = nunca aplicado)
+    "r":    None,
+    "g":    None,
+    "b":    None,
+}
 
 def apply_led_state(led_state, cpu_temp, current_color):
     """
-    Aplica el estado de LEDs recibido del dashboard.
+    Aplica el estado de LEDs solo si algo ha cambiado desde la última vez.
+    Esto evita resetear las animaciones del firmware (follow, breathing)
+    en cada iteración del bucle.
+
     Devuelve current_color actualizado.
-
-    led_state puede ser None (→ modo auto, igual que antes) o:
-      {
-        "mode": "auto" | "off" | "static" | "follow" | "breathing" | "rainbow",
-        "r": 0-255, "g": 0-255, "b": 0-255   (solo para static/follow/breathing)
-      }
     """
+    global _last_led_applied
+
+    # ── Determinar modo y color deseados ─────────────────────────────────────
     if led_state is None or led_state.get("mode", "auto") == "auto":
-        # Comportamiento original: smooth hacia temp_to_color
-        target_color = temp_to_color(cpu_temp)
-        current_color = smooth(current_color, target_color)
-        board.set_led_mode(1)                      # RGB fijo (smooth lo simula)
-        board.set_all_led_color(*current_color)
-        return current_color
+        # Modo auto: smooth del color hacia temp_to_color
+        target_color  = temp_to_color(cpu_temp)
+        new_color     = smooth(current_color, target_color)
+        desired_mode  = "auto"
+        desired_r, desired_g, desired_b = new_color
+    else:
+        mode_str = led_state.get("mode", "auto")
+        if mode_str == "off":
+            desired_mode  = "off"
+            desired_r, desired_g, desired_b = 0, 0, 0
+        elif mode_str == "rainbow":
+            desired_mode  = "rainbow"
+            desired_r, desired_g, desired_b = 0, 0, 0   # el color no importa en rainbow
+        else:
+            # static / follow / breathing
+            desired_mode  = mode_str
+            desired_r = int(led_state.get("r", 0))
+            desired_g = int(led_state.get("g", 255))
+            desired_b = int(led_state.get("b", 0))
+        new_color = (desired_r, desired_g, desired_b)
 
-    mode_str = led_state.get("mode", "auto")
+    # ── Detectar si algo ha cambiado ──────────────────────────────────────────
+    # Para modo auto el color cambia en pequeños pasos (smooth), así que solo
+    # escribimos si el cambio es mayor que un umbral (evita escrituras I2C constantes
+    # mientras el color está prácticamente estable).
+    if desired_mode == "auto":
+        last_r = _last_led_applied["r"] or 0
+        last_g = _last_led_applied["g"] or 0
+        last_b = _last_led_applied["b"] or 0
+        color_delta = (
+            abs(desired_r - last_r) +
+            abs(desired_g - last_g) +
+            abs(desired_b - last_b)
+        )
+        mode_changed  = (_last_led_applied["mode"] != "auto")
+        color_changed = (color_delta >= 8)   # umbral: ignorar cambios menores de 8 puntos RGB
+    else:
+        mode_changed  = (_last_led_applied["mode"] != desired_mode)
+        color_changed = (
+            _last_led_applied["r"] != desired_r or
+            _last_led_applied["g"] != desired_g or
+            _last_led_applied["b"] != desired_b
+        )
 
-    if mode_str == "off":
+    if not mode_changed and not color_changed:
+        # Nada que hacer — el firmware gestiona la animación sin interferencia
+        return new_color
+
+    # ── Aplicar solo si hay cambio ────────────────────────────────────────────
+    if desired_mode == "off":
         board.set_led_mode(0)
         board.set_all_led_color(0, 0, 0)
-        return (0, 0, 0)
 
-    if mode_str == "rainbow":
-        board.set_led_mode(4)
-        return current_color  # el color no importa en rainbow
+    elif desired_mode == "rainbow":
+        if mode_changed:
+            board.set_led_mode(4)
+        # No llamar set_all_led_color en rainbow — el firmware gestiona los colores
 
-    # static / follow / breathing → necesitan color R,G,B
-    r = int(led_state.get("r", 0))
-    g = int(led_state.get("g", 255))
-    b = int(led_state.get("b", 0))
-    board_mode = _LED_MODE_MAP.get(mode_str, 1)
-    board.set_led_mode(board_mode)
-    board.set_all_led_color(r, g, b)
-    return (r, g, b)
+    elif desired_mode == "breathing":
+        if mode_changed:
+            board.set_led_mode(3)
+        if color_changed:
+            board.set_all_led_color(desired_r, desired_g, desired_b)
+        # Nota: set_all_led_color en breathing solo fija el COLOR BASE de la respiración,
+        # no reinicia la animación si el modo ya estaba en 3. Pero si mode_changed=True
+        # (acabamos de activar el modo) es correcto enviarlo una sola vez.
+
+    elif desired_mode == "follow":
+        if mode_changed:
+            board.set_led_mode(2)
+        if color_changed:
+            board.set_all_led_color(desired_r, desired_g, desired_b)
+        # Mismo principio que breathing
+
+    else:
+        # "auto" o "static" → modo 1 RGB fijo
+        if mode_changed:
+            board.set_led_mode(1)
+        board.set_all_led_color(desired_r, desired_g, desired_b)
+
+    # ── Actualizar estado aplicado ────────────────────────────────────────────
+    _last_led_applied["mode"] = desired_mode
+    _last_led_applied["r"]    = desired_r
+    _last_led_applied["g"]    = desired_g
+    _last_led_applied["b"]    = desired_b
+
+    return new_color
 
 # ── OLED ──────────────────────────────────────────────────────────────────────
 last_oled_state = {
