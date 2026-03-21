@@ -32,6 +32,13 @@ oled  = OLED()
 oled.clear()
 font  = ImageFont.load_default()
 
+# ── Estado de rotación de IPs ─────────────────────────────────────────────────
+_ip_list       = []   # [(iface, ip), ...]
+_ip_index      = 0
+_ip_last_rot   = 0
+_IP_ROT_S      = 3    # segundos entre rotaciones
+
+
 # ── Funciones de lectura de JSON ─────────────────────────────────────────────
 def read_fan_state():
     if not os.path.exists(STATE_FILE):
@@ -91,13 +98,41 @@ def smooth(prev, target, step=10):
         for i in range(3)
     )
 
-def get_ip():
-    for _ in range(10):
-        ip_output = subprocess.getoutput("hostname -I").split()
-        if ip_output:
-            return ip_output[0]
-        time.sleep(1)
-    return "No IP"
+
+def get_all_ips():
+    """Devuelve lista de (iface, ip) para todas las interfaces activas con IPv4."""
+    result = []
+    addrs = psutil.net_if_addrs()
+    stats = psutil.net_if_stats()
+    # Orden por métrica de ruta
+    try:
+        output = subprocess.getoutput("ip route show default")
+        iface_metrics = {}
+        for line in output.splitlines():
+            if 'default' in line:
+                parts = line.split()
+                try:
+                    iface  = parts[parts.index('dev') + 1]
+                    metric = int(parts[parts.index('metric') + 1])
+                    iface_metrics[iface] = metric
+                except (ValueError, IndexError):
+                    pass
+    except Exception:
+        iface_metrics = {}
+
+    for iface, addr_list in addrs.items():
+        if iface == 'lo':
+            continue
+        if iface in stats and not stats[iface].isup:
+            continue
+        for addr in addr_list:
+            if addr.family.name == 'AF_INET':
+                metric = iface_metrics.get(iface, 999)
+                result.append((iface, addr.address, metric))
+
+    # Ordenar por métrica — la prioritaria primero
+    result.sort(key=lambda x: x[2])
+    return [(iface, ip) for iface, ip, _ in result]
 
 def get_ip_of_interface(iface_name="tun0"):
     addrs = psutil.net_if_addrs()
@@ -233,13 +268,12 @@ last_oled_state = {
     "fan0_duty": None, "fan1_duty": None
 }
 
-def draw_oled_smart(cpu, ram, temp, ip, tun_ip, fan0_duty, fan1_duty):
+def draw_oled_smart(cpu, ram, temp, ip, fan0_duty, fan1_duty):
     changed = (
         round(cpu, 1)  != last_oled_state["cpu"]      or
         round(ram, 1)  != last_oled_state["ram"]      or
         int(temp)      != last_oled_state["temp"]     or
         ip             != last_oled_state["ip"]       or
-        tun_ip         != last_oled_state["tun_ip"]   or
         fan0_duty      != last_oled_state["fan0_duty"] or
         fan1_duty      != last_oled_state["fan1_duty"]
     )
@@ -250,16 +284,19 @@ def draw_oled_smart(cpu, ram, temp, ip, tun_ip, fan0_duty, fan1_duty):
     oled.draw_text(f"CPU: {cpu:>5.1f} %",   (0, 0))
     oled.draw_text(f"RAM: {ram:>5.1f} %",   (0, 12))
     oled.draw_text(f"TEMP:{temp:>5.1f} C",  (0, 24))
-    oled.draw_text(f"IP: {ip}",              (0, 36))
-    if tun_ip != "No IP":
-        oled.draw_text(f"IP Tun: {tun_ip}",               (0, 48))
+    if _ip_list:
+        iface, ip = _ip_list[_ip_index]
+        # Abreviar nombre interfaz para que quepa: wlan0→w0, eth0→e0, tun0→t0
+        short = iface.replace('wlan','w').replace('eth','e').replace('tun','t')
+        oled.draw_text(f"{short}:{ip}", (0, 36))
     else:
-        oled.draw_text(f"Fan1:{fan0_duty}%/ Fan2:{fan1_duty}%", (0, 48))
+        oled.draw_text("Sin red", (0, 36))
+    oled.draw_text(f"Fan1:{fan0_duty}%/ Fan2:{fan1_duty}%", (0, 48))
     oled.show()
 
     last_oled_state.update({
         "cpu": round(cpu, 1), "ram": round(ram, 1),
-        "temp": int(temp), "ip": ip, "tun_ip": tun_ip,
+        "temp": int(temp), "ip": ip,
         "fan0_duty": fan0_duty, "fan1_duty": fan1_duty
     })
 
@@ -294,11 +331,13 @@ try:
 
         # ── IPs (cada 20s) ──
         if now - last_ip_time > 20:
-            last_ip     = get_ip()
-            last_tun_ip = get_ip_of_interface("tun0")
+            _ip_list     = get_all_ips()
             last_ip_time = now
-        ip     = last_ip
-        tun_ip = last_tun_ip
+        ip = last_ip_time
+        # ── Rotación de IP en OLED ──
+        if now - _ip_last_rot > _IP_ROT_S and _ip_list:
+            _ip_index    = (_ip_index + 1) % len(_ip_list)
+            _ip_last_rot = now
 
         # ── fan_state.json (cada 1s) ──
         if now - last_state_time > 1:
@@ -344,7 +383,7 @@ try:
             last_hw_time = now
 
         # ── OLED ──
-        draw_oled_smart(cpu, ram, temp, ip, tun_ip, fan0_duty, fan1_duty)
+        draw_oled_smart(cpu, ram, temp, ip, fan0_duty, fan1_duty)
 
         time.sleep(0.5)
 
